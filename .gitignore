@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.env
+.venv/
+venv/
+env/
+ENV/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Flask instance & SQLite DB
+instance/
+*.db
+
+# Media & generated captures (uncomment if you want to version them)
+capture/
+app/capture/
+timelapse/
+app/timelapse/
+
+# Logs
+*.log
+
+# OS / Editor
+.DS_Store
+.vscode/
+
+# Cache
+*.cache

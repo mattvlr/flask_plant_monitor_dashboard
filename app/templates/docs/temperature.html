@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ESP32 + DHT11 → Flask JSON: Design & Implementation Guide</title>
+<style>
+  :root {
+    --fg: #111;
+    --bg: #fff;
+    --muted: #666;
+    --rule: #000;
+  }
+  html, body { background: var(--bg); color: var(--fg); margin: 0; padding: 0; }
+  body { font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1, h2, h3 { line-height: 1.25; margin: 28px 0 10px; }
+  h1 { font-size: 28px; text-transform: none; letter-spacing: 0; }
+  h2 { font-size: 22px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+  h3 { font-size: 18px; }
+  p { margin: 10px 0 12px; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  pre { background: #f6f6f6; color: #000; border: 1px solid #000; padding: 14px; overflow:auto; }
+  kbd { border: 1px solid #000; padding: 2px 4px; font-size: 0.9em; }
+  .muted { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .grid-2-1 { display:grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+  .card { border: 1px solid var(--rule); padding: 14px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; }
+  th, td { border: 1px solid #000; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f0f0f0; }
+  ul { margin: 8px 0 12px 20px; }
+  ol { margin: 8px 0 12px 20px; }
+  .toc a { text-decoration: none; color: inherit; }
+  .toc li { margin: 4px 0; }
+  .callout { border: 1px solid #000; padding: 10px 12px; background: #fafafa; }
+  .small { font-size: 12px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  .hr { border-top: 2px solid #000; margin: 18px 0; }
+  @media print {
+    a[href]:after { content: " (" attr(href) ")"; font-size: 11px; }
+    .wrap { padding: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ESP32 + DHT11 → Flask JSON<br><span class="muted">Design & Implementation Guide</span></h1>
+  <p class="muted">Monochrome, print‑ready documentation. Focused on reproducibility, wiring correctness, timing, and payload contracts.</p>
+
+  <h2 id="toc">Contents</h2>
+  <ol class="toc">
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#bom">Bill of Materials</a></li>
+    <li><a href="#wiring">Wiring & Power</a></li>
+    <li><a href="#network">Network & Endpoint</a></li>
+    <li><a href="#payload">Payload Contract</a></li>
+    <li><a href="#build">Build & Flash (Arduino IDE)</a></li>
+    <li><a href="#behavior">Runtime Behavior</a></li>
+    <li><a href="#timing">Timing & Throughput</a></li>
+    <li><a href="#code">Full Sketch</a></li>
+    <li><a href="#logs">Expected Serial Logs</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+    <li><a href="#validation">Validation Checklist</a></li>
+    <li><a href="#security">Security & Hardening</a></li>
+    <li><a href="#ext">Extensions & Variations</a></li>
+    <li><a href="#specs">DHT11 Quick Specs</a></li>
+  </ol>
+
+  <h2 id="overview">1) Overview</h2>
+  <p>This firmware reads temperature and relative humidity from a DHT11 sensor on an ESP32, then issues two back‑to‑back HTTP <span class="mono">POST</span> requests once per minute to a Flask endpoint on the local network. Each POST contains one measurement:</p>
+  <ul>
+    <li>Temperature as either Celsius (<span class="mono">dht11_temp_c</span>) or Fahrenheit (<span class="mono">dht11_temp_f</span>) depending on <span class="mono">USE_FAHRENHEIT</span>.</li>
+    <li>Humidity percentage as <span class="mono">dht11_humidity_pct</span>.</li>
+  </ul>
+  <p>The route persists records into a database table <span class="mono">readings(sensor_type, plant_id, reading)</span>.</p>
+
+  <h2 id="bom">2) Bill of Materials</h2>
+  <table>
+    <thead><tr><th>Item</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>ESP32 DevKit (ESP‑WROOM‑32 or equivalent)</td><td>3.3&nbsp;V logic, integrated Wi‑Fi</td></tr>
+      <tr><td>DHT11 sensor module</td><td>Prefer a module with onboard 10&nbsp;kΩ pull‑up on DATA</td></tr>
+      <tr><td>Jumper wires</td><td>Male‑to‑female recommended if module header pins</td></tr>
+      <tr><td>USB cable</td><td>For power and flashing</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="wiring">3) Wiring & Power</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Connections</h3>
+      <table>
+        <thead><tr><th>DHT11</th><th>ESP32</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>VCC</td><td>3V3</td><td>DHT11 supports 3.3–5&nbsp;V. Use 3V3 on ESP32.</td></tr>
+          <tr><td>GND</td><td>GND</td><td>Common ground required.</td></tr>
+          <tr><td>DATA</td><td>GPIO&nbsp;4 (configurable)</td><td>Define via <span class="mono">#define DHT_PIN 4</span>.</td></tr>
+        </tbody>
+      </table>
+      <p>If using a bare DHT11 (not a module), add a 10&nbsp;kΩ pull‑up from DATA to 3V3.</p>
+    </div>
+    <div class="card">
+      <h3>Power Notes</h3>
+      <ul>
+        <li>Typical DHT11 draw &lt; 2.5&nbsp;mA.</li>
+        <li>Avoid long, noisy cables; keep DATA run short to reduce timing errors.</li>
+        <li>USB 5&nbsp;V → ESP32 onboard regulator → 3.3&nbsp;V rail.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="network">4) Network & Endpoint</h2>
+  <table>
+    <tbody>
+      <tr><th>Wi‑Fi SSID</th><td><code>4301b</code></td></tr>
+      <tr><th>Wi‑Fi Password</th><td><code>scoutdog1</code></td></tr>
+      <tr><th>HTTP Method</th><td><code>POST</code></td></tr>
+      <tr><th>Content‑Type</th><td><code>application/json</code></td></tr>
+      <tr><th>Endpoint</th><td><code>http://192.168.50.243:5001/add_data</code></td></tr>
+      <tr><th>Timeout</th><td>5&nbsp;s (client‑side)</td></tr>
+      <tr><th>Interval</th><td>Every 60&nbsp;s, two consecutive posts per cycle</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="payload">5) Payload Contract</h2>
+  <p>The Flask route expects JSON keys shown below. <span class="mono">plant_id</span> is an integer in this build.</p>
+  <div class="grid">
+    <div class="card">
+      <h3>Temperature POST</h3>
+      <pre><code>{
+  "sensor_type": "dht11_temp_f",   // or "dht11_temp_c" if USE_FAHRENHEIT=false
+  "reading": 73.00,                // float
+  "plant_id": 1                    // int
+}</code></pre>
+    </div>
+    <div class="card">
+      <h3>Humidity POST</h3>
+      <pre><code>{
+  "sensor_type": "dht11_humidity_pct",
+  "reading": 45.00,
+  "plant_id": 1
+}</code></pre>
+    </div>
+  </div>
+  <p class="small muted">Server response 200/201 indicates success; other codes are logged to Serial.</p>
+
+  <h2 id="build">6) Build & Flash (Arduino IDE)</h2>
+  <ol>
+    <li>Install ESP32 board support via <span class="mono">Boards Manager</span> (Espressif Systems).</li>
+    <li>Libraries:
+      <ul>
+        <li><strong>DHT sensor library</strong> by Adafruit.</li>
+        <li>(Optional) <strong>Adafruit Unified Sensor</strong> if prompted as a dependency.</li>
+      </ul>
+    </li>
+    <li>Board: <span class="mono">ESP32 Dev Module</span> (or your specific ESP32 variant).</li>
+    <li>Set correct COM/tty port.</li>
+    <li>Open the sketch and edit the <em>User Config</em> block:
+      <ul>
+        <li><span class="mono">WIFI_SSID</span>, <span class="mono">WIFI_PASS</span></li>
+        <li><span class="mono">SERVER_URL</span> (defaults to your LAN host)</li>
+        <li><span class="mono">PLANT_ID</span> (int)</li>
+        <li><span class="mono">DHT_PIN</span> (GPIO for DATA)</li>
+        <li><span class="mono">USE_FAHRENHEIT</span> (true/false)</li>
+      </ul>
+    </li>
+    <li>Compile and upload. Open <span class="mono">Serial Monitor</span> at 115200 baud.</li>
+  </ol>
+
+  <h2 id="behavior">7) Runtime Behavior</h2>
+  <div class="grid-2-1">
+    <div class="card">
+      <h3>State Flow</h3>
+      <ol>
+        <li><strong>Boot</strong>: Start Serial → init DHT → connect Wi‑Fi.</li>
+        <li><strong>Cycle</strong> (once per minute):
+          <ol>
+            <li>Read <span class="mono">humidity</span>, <span class="mono">tempC</span>, <span class="mono">tempF</span>.</li>
+            <li>Validate (reject <span class="mono">NaN</span>, clamp humidity 0–100%).</li>
+            <li>POST temperature JSON.</li>
+            <li>POST humidity JSON.</li>
+            <li><strong>Hard delay</strong> 60&nbsp;s.</li>
+          </ol>
+        </li>
+        <li><strong>Connectivity</strong>: If Wi‑Fi drops, reconnect before next cycle.</li>
+      </ol>
+    </div>
+    <div class="card">
+      <h3>Design Notes</h3>
+      <ul>
+        <li>DHT11 has ~1&nbsp;Hz max sample rate. One read per minute is conservative and reliable.</li>
+        <li>Back‑to‑back posts ensure separate DB rows per measurement.</li>
+        <li>Client timeout 5&nbsp;s avoids long stalls on server issues.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="timing">8) Timing & Throughput</h2>
+  <table>
+    <thead><tr><th>Parameter</th><th>Value</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>POST interval</td><td>60&nbsp;s</td><td>Two HTTP requests per interval</td></tr>
+      <tr><td>DHT sample rate</td><td>≤ 1&nbsp;Hz</td><td>Vendor guidance; minute spacing is safe</td></tr>
+      <tr><td>HTTP timeout</td><td>5&nbsp;s</td><td>Client abort if server unresponsive</td></tr>
+      <tr><td>Loop idle</td><td>25&nbsp;ms</td><td>Cooperative multitasking</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="code">9) Full Sketch</h2>
+  <pre><code>/*
+  ESP32 + DHT11 -> Flask JSON (back-to-back posts each minute)
+
+  Route expects JSON:
+    { "sensor_type": "&lt;string&gt;", "reading": &lt;float&gt;, "plant_id": &lt;int&gt; }
+
+  Posts in this order each cycle:
+    1) sensor_type = "dht11_temp_c" (or "_f" if USE_FAHRENHEIT = true)
+    2) sensor_type = "dht11_humidity_pct"
+
+  Library deps (Arduino Library Manager):
+    - "DHT sensor library" by Adafruit
+*/
+
+#include &lt;WiFi.h&gt;
+#include &lt;HTTPClient.h&gt;
+#include &lt;DHT.h&gt;
+
+// ========= USER CONFIG =========
+const char* WIFI_SSID   = "4301b";   // e.g. "4301b"
+const char* WIFI_PASS   = "scoutdog1";   // e.g. "scoutdog1"
+
+// Flask route
+const char* SERVER_URL  = "http://192.168.50.243:5001/add_data";
+
+// Identify the plant in your DB
+const int   PLANT_ID    = 1;
+
+// DHT wiring and type
+#define DHT_PIN   4        // &lt;-- set to your GPIO
+#define DHT_TYPE  DHT11    // DHT11 module
+
+// Units
+#define USE_FAHRENHEIT true   // true => post temp in °F with type "dht11_temp_f"
+
+// Interval
+constexpr unsigned long POST_INTERVAL_MS = 60UL * 1000UL;
+// ===============================
+
+// Sensor types for route
+const char* SENSOR_TYPE_TEMP_C = "dht11_temp_c";
+const char* SENSOR_TYPE_TEMP_F = "dht11_temp_f";
+const char* SENSOR_TYPE_HUM    = "dht11_humidity_pct";
+
+// Globals
+DHT dht(DHT_PIN, DHT_TYPE);
+unsigned long lastPostMs = 0;
+
+// Forward decls
+void connectWiFi();
+void ensureWiFiConnected();
+bool postReading(const char* sensorType, float value);
+void doOneCycle();
+
+void setup() {
+  Serial.begin(115200);
+  delay(150);
+  Serial.println("\n[BOOT] ESP32 DHT11 -> Flask JSON");
+
+  // Start sensors
+  dht.begin();
+  Serial.printf("[DHT] Init on pin %d, type DHT11\n", DHT_PIN);
+
+  // Wi-Fi
+  connectWiFi();
+
+  // Trigger immediate first send
+  lastPostMs = 0;
+  Serial.println("[BOOT] Ready.");
+}
+
+void loop() {
+  ensureWiFiConnected();
+
+  unsigned long now = millis();
+  if (lastPostMs == 0 || (now - lastPostMs) &gt;= POST_INTERVAL_MS) {
+    lastPostMs = now;
+    doOneCycle();         // back-to-back posts
+    // Explicit pause to match "back to back then pause 60s"
+    // Note: we also guard via millis() above, but this enforces a hard wait.
+    delay(POST_INTERVAL_MS);
+  }
+  delay(25);
+}
+
+void doOneCycle() {
+  // Read once. Adafruit DHT does an internal sample and caches briefly.
+  // DHT11 resolution is low; expect integers or 0.5 steps.
+  float h = dht.readHumidity();                                  // %
+  float tC = dht.readTemperature();                              // °C
+  float tF = dht.readTemperature(true);                          // °F
+
+  // Debug prints for raw reads
+  Serial.printf("[READ] Raw -> humidity=%.1f%% tempC=%.1fC tempF=%.1fF\n", h, tC, tF);
+
+  // Validate readings (NaN when read fails)
+  if (isnan(h) || isnan(tC) || isnan(tF)) {
+    Serial.println("[READ] DHT read failed (NaN). Skipping this cycle.");
+    return;
+  }
+
+  // Clamp humidity to a sane range
+  if (h &lt; 0.0f) h = 0.0f;
+  if (h &gt; 100.0f) h = 100.0f;
+
+  // Choose temp unit
+  float tempValue = USE_FAHRENHEIT ? tF : tC;
+  const char* tempType = USE_FAHRENHEIT ? SENSOR_TYPE_TEMP_F : SENSOR_TYPE_TEMP_C;
+
+  // Back-to-back posts: temperature then humidity
+  bool ok1 = postReading(tempType, tempValue);
+  bool ok2 = postReading(SENSOR_TYPE_HUM, h);
+
+  Serial.printf("[POST] temp=%s hum=%s\n", ok1 ? "OK" : "FAIL", ok2 ? "OK" : "FAIL");
+}
+
+void connectWiFi() {
+  Serial.printf("[WIFI] Connecting to SSID: %s\n", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+    if (millis() - start &gt; 20000) {
+      Serial.println("\n[WIFI] Timeout. Re-attempting.");
+      WiFi.disconnect(true);
+      WiFi.begin(WIFI_SSID, WIFI_PASS);
+      start = millis();
+    }
+  }
+  Serial.printf("\n[WIFI] Connected. IP=%s\n", WiFi.localIP().toString().c_str());
+}
+
+void ensureWiFiConnected() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[WIFI] Disconnected. Reconnecting.");
+    connectWiFi();
+  }
+}
+
+bool postReading(const char* sensorType, float value) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[HTTP] No Wi-Fi. Abort POST.");
+    return false;
+  }
+
+  WiFiClient client;   // HTTP (no TLS)
+  HTTPClient http;
+  http.setTimeout(5000);
+
+  if (!http.begin(client, SERVER_URL)) {
+    Serial.println("[HTTP] http.begin() failed");
+    return false;
+  }
+
+  http.addHeader("Content-Type", "application/json");
+
+  // Build compact JSON manually
+  String payload = String("{\"sensor_type\":\"") + sensorType +
+                   "\",\"reading\":" + String(value, 2) +
+                   ",\"plant_id\":" + String(PLANT_ID) + "}";
+
+  Serial.print("[HTTP] POST payload: ");
+  Serial.println(payload);
+
+  int code = http.POST(payload);
+  Serial.printf("[HTTP] Status: %d\n", code);
+  String resp = http.getString();
+  Serial.print("[HTTP] Response: ");
+  Serial.println(resp);
+
+  http.end();
+  return (code == 201 || code == 200);
+}</code></pre>
+
+  <h2 id="logs">10) Expected Serial Logs</h2>
+  <pre><code>[BOOT] ESP32 DHT11 -> Flask JSON
+[DHT] Init on pin 4, type DHT11
+[WIFI] Connecting to SSID: 4301b
+....
+[WIFI] Connected. IP=192.168.50.xxx
+[BOOT] Ready.
+[READ] Raw -> humidity=44.0% tempC=23.0C tempF=73.0F
+[HTTP] POST payload: {"sensor_type":"dht11_temp_f","reading":73.00,"plant_id":1}
+[HTTP] Status: 201
+[HTTP] Response: {"success": true}
+[HTTP] POST payload: {"sensor_type":"dht11_humidity_pct","reading":44.00,"plant_id":1}
+[HTTP] Status: 201
+[HTTP] Response: {"success": true}
+[POST] temp=OK hum=OK
+</code></pre>
+
+  <h2 id="troubleshooting">11) Troubleshooting</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>NaN Readings</h3>
+      <ul>
+        <li>Verify DATA pin and <span class="mono">DHT_PIN</span> match.</li>
+        <li>Ensure 10&nbsp;kΩ pull‑up on DATA if using bare sensor.</li>
+        <li>Reduce cable length; keep under ~20&nbsp;cm if possible.</li>
+        <li>Power the sensor from 3V3, not 5V, on ESP32.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Wi‑Fi Fails</h3>
+      <ul>
+        <li>Check SSID/password.</li>
+        <li>Confirm 2.4&nbsp;GHz enabled on AP.</li>
+        <li>Observe IP printed after connect; ping from PC.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Server Unreachable</h3>
+      <ul>
+        <li>Open the Flask route URL from a browser on same LAN.</li>
+        <li>Check Flask logs for incoming requests or errors.</li>
+        <li>Test with <code>curl -X POST -H "Content-Type: application/json" \
+-d '{"sensor_type":"test","reading":1,"plant_id":1}' http://192.168.50.243:5001/add_data</code></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Outliers</h3>
+      <ul>
+        <li>DHT11 accuracy: ±2&nbsp;°C, ±5% RH typical; do not overfit.</li>
+        <li>Consider debouncing spikes server‑side if needed.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="validation">12) Validation Checklist</h2>
+  <ul>
+    <li>Serial shows successful Wi‑Fi connection.</li>
+    <li>Two HTTP 200/201 responses per minute.</li>
+    <li>Database rows appear with expected <span class="mono">sensor_type</span> values.</li>
+    <li>Humidity within 0–100%, temperature plausible for environment.</li>
+  </ul>
+
+  <h2 id="security">13) Security & Hardening</h2>
+  <ul>
+    <li>Plain HTTP on LAN. For wider networks, use TLS termination or a reverse proxy.</li>
+    <li>Add a shared token header (e.g., <span class="mono">X-API-Key</span>) and validate server‑side.</li>
+    <li>Rate‑limit on the Flask route if many devices send data.</li>
+  </ul>
+
+  <h2 id="ext">14) Extensions & Variations</h2>
+  <ul>
+    <li>Switch to DHT22 for better accuracy and wider range.</li>
+    <li>Attach a status LED to show POST success/fail.</li>
+    <li>Buffer failed readings and retry with exponential backoff.</li>
+    <li>Include timestamps in payload and store server‑side.</li>
+    <li>Batch both readings in a single JSON if schema allows.</li>
+  </ul>
+
+  <h2 id="specs">15) DHT11 Quick Specs</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Temp range</td><td>0–50&nbsp;°C</td></tr>
+      <tr><td>Temp accuracy</td><td>±2&nbsp;°C (typical)</td></tr>
+      <tr><td>Humidity range</td><td>20–90% RH (non‑condensing)</td></tr>
+      <tr><td>Humidity accuracy</td><td>±5% RH (typical)</td></tr>
+      <tr><td>Resolution</td><td>1&nbsp;°C, 1% RH</td></tr>
+      <tr><td>Sampling period</td><td>&gt; 1&nbsp;s</td></tr>
+      <tr><td>Supply</td><td>3.3–5.0&nbsp;V</td></tr>
+    </tbody>
+  </table>
+
+  <div class="hr"></div>
+
+</div>
+</body>
+</html>

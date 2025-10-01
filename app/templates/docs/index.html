@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block title %}Documentation - Overview{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-4">Sensor Documentation Overview</h1>
+<p class="text-slate-300 mb-6">Quick reference for sensors deployed in the tent. Use the side links to view details.</p>
+<ul class="list-disc pl-6 space-y-1 text-slate-400">
+  <li><a class="text-emerald-400 hover:underline" href="{{ url_for('main.docs', page='temperature') }}">Temperature / Humidity Sensor</a></li>
+  <li><a class="text-emerald-400 hover:underline" href="{{ url_for('main.docs', page='light') }}">Light Sensor</a></li>
+  <li><a class="text-emerald-400 hover:underline" href="{{ url_for('main.docs', page='moisture') }}">Soil Moisture Sensor</a></li>
+  <li><a class="text-emerald-400 hover:underline" href="{{ url_for('main.docs', page='tent') }}">Indoor Pepper Tent (Arkansas)</a></li>
+  <li><a class="text-emerald-400 hover:underline" href="{{ url_for('main.docs', page='vpd') }}">Vapor Pressure Deficit (VPD)</a></li>
+  <li><a class="text-emerald-400 hover:underline" href="{{ url_for('main.docs', page='camera') }}">Camera Module</a></li>
+</ul>
+{% endblock %}

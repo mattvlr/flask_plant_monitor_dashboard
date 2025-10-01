@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Indoor Pepper Tent (600W LED) – Complete Cultivation Guide</title>
+<style>
+  :root {
+    --fg: #111;
+    --bg: #fff;
+    --muted: #666;
+    --rule: #000;
+  }
+  html, body { background: var(--bg); color: var(--fg); margin: 0; padding: 0; }
+  body { font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1, h2, h3 { line-height: 1.25; margin: 28px 0 10px; }
+  h1 { font-size: 28px; }
+  h2 { font-size: 22px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+  h3 { font-size: 18px; }
+  p { margin: 10px 0 12px; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  pre { background: #f6f6f6; color: #000; border: 1px solid #000; padding: 14px; overflow:auto; }
+  kbd { border: 1px solid #000; padding: 2px 4px; font-size: 0.9em; }
+  .muted { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .grid-2-1 { display:grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+  .grid-1-2 { display:grid; grid-template-columns: 1fr 2fr; gap: 16px; }
+  .card { border: 1px solid var(--rule); padding: 14px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; }
+  th, td { border: 1px solid #000; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f0f0f0; }
+  ul { margin: 8px 0 12px 20px; }
+  ol { margin: 8px 0 12px 20px; }
+  .toc a { text-decoration: none; color: inherit; }
+  .toc li { margin: 4px 0; }
+  .callout { border: 1px solid #000; padding: 10px 12px; background: #fafafa; }
+  .small { font-size: 12px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  .hr { border-top: 2px solid #000; margin: 18px 0; }
+  @media print {
+    a[href]:after { content: " (" attr(href) ")"; font-size: 11px; }
+    .wrap { padding: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Indoor Pepper Tent (600W LED)<br><span class="muted">Practical, print‑ready playbook for jalapeño, serrano, habanero, bells, and superhots</span></h1>
+  <p class="muted">Monochrome, checklist‑friendly format. Targets consistent fruit set and manageable maintenance in a home grow tent. This guide mirrors the styling of your existing technical docs for easy reuse across projects.</p>
+
+  <h2 id="toc">Contents</h2>
+  <ol class="toc">
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#varieties">Variety Profiles</a></li>
+    <li><a href="#environment">Environment Targets by Phase</a></li>
+    <li><a href="#light">Lighting with a 600W LED</a></li>
+    <li><a href="#ppfd">PPFD → DLI Planner</a></li>
+    <li><a href="#layout">Tent Layout & Mounting Heights</a></li>
+    <li><a href="#water">Watering, Media, and Fertility</a></li>
+    <li><a href="#train">Pruning, Training, and Spacing</a></li>
+    <li><a href="#pollination">Pollination and Fruit Set</a></li>
+    <li><a href="#pests">Pests, Disease, and IPM</a></li>
+    <li><a href="#sensors">Sensors & Automation</a></li>
+    <li><a href="#schedules">Daily/Weekly Schedules</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+    <li><a href="#harvest">Harvest & Postharvest</a></li>
+    <li><a href="#calc">Appendix A: Power & Cost</a></li>
+    <li><a href="#ref">Appendix B: Reference Quick‑Sheet</a></li>
+  </ol>
+
+  <h2 id="overview">1) Overview</h2>
+  <div class="grid-2-1">
+    <div class="card">
+      <p>Peppers (Capsicum annuum/chinense/baccatum) are day‑length tolerant and fruit indoors if light intensity, temperature, and airflow are balanced. A single 600 W LED can sustain 2–6 plants depending on canopy size, cultivar vigor, and target PPFD.</p>
+      <ul>
+        <li><strong>Goal</strong>: 20–30 mol·m⁻²·day⁻¹ DLI to maintain flowering, with leaf temps ~24–28 °C.</li>
+        <li><strong>Key risks</strong>: Low PPFD/DLI, stagnant air, excessive heat at apical buds, and chronic overwatering.</li>
+        <li><strong>Levers</strong>: Light height/dimmer, fan placement, pot volume, and steady EC.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Quick Inputs → Outputs</h3>
+      <table>
+        <thead><tr><th>Input</th><th>Target</th><th>Output</th></tr></thead>
+        <tbody>
+          <tr><td>PPFD @ canopy</td><td>400–600 µmol·m⁻²·s⁻¹</td><td>20–30 DLI at 14–16 h</td></tr>
+          <tr><td>Day / Night</td><td>24–28 °C / 18–22 °C</td><td>Steady bloom and set</td></tr>
+          <tr><td>RH</td><td>50–65 %</td><td>Flower pollen viability</td></tr>
+          <tr><td>Airflow</td><td>Gentle leaf flutter</td><td>Stem strength, disease control</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <h2 id="varieties">2) Variety Profiles</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Annumm: Jalapeño / Serrano / Bell</h3>
+      <ul>
+        <li><strong>Habit</strong>: Compact to medium; responsive to topping.</li>
+        <li><strong>PPFD</strong>: 400–500.</li>
+        <li><strong>Pot</strong>: 3–5 gal per plant for indoor tents.</li>
+        <li><strong>Notes</strong>: Fast bloom; reliable set under 55–60 % RH.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Chinense: Habanero / Scotch Bonnet</h3>
+      <ul>
+        <li><strong>Habit</strong>: Bushy, slower veg; likes warmth.</li>
+        <li><strong>PPFD</strong>: 450–600.</li>
+        <li><strong>Pot</strong>: 5–7 gal recommended.</li>
+        <li><strong>Notes</strong>: Sensitive to cool nights; delay set if < 20 °C.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h3>Superhots: Ghost / Reaper / 7‑Pot</h3>
+      <ul>
+        <li><strong>Habit</strong>: Tall, apically dominant; longer time‑to‑ripe.</li>
+        <li><strong>PPFD</strong>: 500–650 if heat managed.</li>
+        <li><strong>Pot</strong>: 7–10 gal to stabilize moisture.</li>
+        <li><strong>Notes</strong>: Keep VPD gentle during early flowering to avoid bud drop.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Baccatum: Aji types</h3>
+      <ul>
+        <li><strong>Habit</strong>: Open, branching; tall with arching laterals.</li>
+        <li><strong>PPFD</strong>: 450–550.</li>
+        <li><strong>Pot</strong>: 5–7 gal; trellis early.</li>
+        <li><strong>Notes</strong>: Fragrant flowers; benefits from 15–16 h photoperiod.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="environment">3) Environment Targets by Phase</h2>
+  <table>
+    <thead><tr><th>Phase</th><th>Temp Day/Night</th><th>RH</th><th>Photoperiod</th><th>PPFD</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Seedling (0–3 wk)</td><td>24–26 °C / 20–22 °C</td><td>65–75 %</td><td>16 h</td><td>200–300</td><td>Domes ok; avoid damping‑off with airflow.</td></tr>
+      <tr><td>Vegetative (3–8 wk)</td><td>24–28 °C / 18–22 °C</td><td>55–65 %</td><td>16 h</td><td>350–500</td><td>Transplant up; begin light training.</td></tr>
+      <tr><td>Flower/Set</td><td>24–28 °C / 18–22 °C</td><td>50–60 %</td><td>14–16 h</td><td>400–600</td><td>Ensure pollen viability; maintain gentle breeze.</td></tr>
+      <tr><td>Bulk/Ripen</td><td>24–27 °C / 18–21 °C</td><td>50–55 %</td><td>14–16 h</td><td>450–600</td><td>Do not overshoot EC late; support branches.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="light">4) Lighting with a 600W LED</h2>
+  <div class="grid-2-1">
+    <div class="card">
+      <h3>Photoperiod and Intensity</h3>
+      <ul>
+        <li><strong>Baseline</strong>: 14–16 h photoperiod year‑round.</li>
+        <li><strong>Dimmer/height</strong>: Target canopy PPFD 400–600. Use a PAR meter or spot‑check with reference map.</li>
+        <li><strong>Heat</strong>: Verify <em>leaf</em> temp with IR thermometer. LED heat can still raise leaf temp near diodes.</li>
+      </ul>
+      <h3>Mounting Heights (starting points)</h3>
+      <table>
+        <thead><tr><th>PPFD Target</th><th>Typical Height*</th><th>Use</th></tr></thead>
+        <tbody>
+          <tr><td>250–300</td><td>60–75 cm</td><td>Seedling/early root‑in</td></tr>
+          <tr><td>400–500</td><td>45–60 cm</td><td>Veg and early flower</td></tr>
+          <tr><td>550–650</td><td>35–50 cm</td><td>Bulk ripening if heat controlled</td></tr>
+        </tbody>
+      </table>
+      <p class="small muted">*Actual height depends on fixture optics and dimmer setting. Confirm with PPFD readouts.</p>
+    </div>
+    <div class="card">
+      <h3>Canopy Management</h3>
+      <ul>
+        <li>Flatten canopy via topping once at 5–7 nodes; then low‑stress tie‑outs.</li>
+        <li>Keep apical buds 5–10 cm below the light’s hotspot to reduce bud drop.</li>
+        <li>Rotate pots weekly for uniformity.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="ppfd">5) PPFD → DLI Planner</h2>
+  <p>DLI (mol·m⁻²·day⁻¹) ≈ PPFD(µmol·m⁻²·s⁻¹) × 3600 × hours ÷ 1,000,000.</p>
+  <table>
+    <thead><tr><th>PPFD</th><th>14 h</th><th>15 h</th><th>16 h</th></tr></thead>
+    <tbody>
+      <tr><td>350</td><td>18.1</td><td>18.9</td><td>20.2</td></tr>
+      <tr><td>400</td><td>20.2</td><td>21.6</td><td>23.0</td></tr>
+      <tr><td>500</td><td>25.2</td><td>27.0</td><td>28.8</td></tr>
+      <tr><td>600</td><td>30.2</td><td>32.4</td><td>34.6</td></tr>
+    </tbody>
+  </table>
+  <div class="callout">
+    <strong>Targets:</strong> Maintain 20–30 DLI for steady flowering. Push toward 30–34 only if heat, water, and nutrition are dialed in.
+  </div>
+
+  <h2 id="layout">6) Tent Layout & Mounting Heights</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Plant Counts by Tent Size</h3>
+      <table>
+        <thead><tr><th>Tent</th><th>Typical Plants</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>2×2 ft</td><td>1–2</td><td>Compact annuum only.</td></tr>
+          <tr><td>2×4 ft</td><td>2–4</td><td>Good for mixed annuum/chinense.</td></tr>
+          <tr><td>4×4 ft</td><td>4–6</td><td>Supports superhots if trained.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Airflow</h3>
+      <ul>
+        <li>Inline exhaust near light; passive intake opposite low side.</li>
+        <li>Clip fans at canopy height for gentle flutter. No hurricane winds.</li>
+        <li>Filter inlet with prefilter to reduce pests/dust.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="water">7) Watering, Media, and Fertility</h2>
+  <div class="grid-1-2">
+    <div class="card">
+      <h3>Media</h3>
+      <ul>
+        <li>Soilless peat/coco mixes drain well and accept precise feed.</li>
+        <li>Add 20–30 % perlite for oxygenation.</li>
+        <li>Fabric pots improve root air‑prune and drying uniformity.</li>
+      </ul>
+      <h3>Watering</h3>
+      <ul>
+        <li>Water when top 2–3 cm dry. Avoid constant saturation.</li>
+        <li>Aim for 10–20 % runoff in fertigation sessions to avoid salt buildup.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Nutrient Guide (EC as µS/cm)</h3>
+      <table>
+        <thead><tr><th>Phase</th><th>N‑P‑K focus</th><th>EC</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Seedling</td><td>Mild N, Ca, Mg</td><td>800–1000</td><td>Half‑strength; avoid burn.</td></tr>
+          <tr><td>Veg</td><td>Higher N, Ca; steady Mg</td><td>1200–1600</td><td>Keep Ca:K balanced for sturdy growth.</td></tr>
+          <tr><td>Flower/Set</td><td>Moderate N, higher K, adequate P</td><td>1400–1800</td><td>Excess N reduces set. Add silica if desired.</td></tr>
+          <tr><td>Bulk/Ripen</td><td>Emphasize K, maintain Ca/Mg</td><td>1400–1800</td><td>Do not crash EC late; maintain turgor.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <h2 id="train">8) Pruning, Training, and Spacing</h2>
+  <ul>
+    <li>Top once at 5–7 nodes to create a low, wide structure.</li>
+    <li>Use soft ties to open the center for airflow and light.</li>
+    <li>Remove the lowest leaf pair after canopy fills to reduce humidity pockets.</li>
+    <li>Stake or trellis before fruit load to prevent splits.</li>
+  </ul>
+
+  <h2 id="pollination">9) Pollination and Fruit Set</h2>
+  <ul>
+    <li>Maintain RH 50–60 % during open flowers for viable pollen.</li>
+    <li>Daily gentle shake or a small oscillation cycle improves pollination.</li>
+    <li>Small brush or electric toothbrush on the stem can supplement on superhots.</li>
+  </ul>
+
+  <h2 id="pests">10) Pests, Disease, and IPM</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Common Issues</h3>
+      <table>
+        <thead><tr><th>Symptom</th><th>Likely Cause</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td>Bud drop</td><td>Heat at canopy, high RH, low Ca</td><td>Lower PPFD hotspot, improve airflow, steady Ca/Mg.</td></tr>
+          <tr><td>Leaf curl</td><td>Heat or VPD stress</td><td>Raise light, increase fan mixing, verify temps.</td></tr>
+          <tr><td>Sticky leaves</td><td>Aphids/whiteflies</td><td>Yellow cards, insecticidal soap, quarantine.</td></tr>
+          <tr><td>Speckling</td><td>Mites</td><td>Increase RH briefly, rinse undersides, introduce predators if possible.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Prevention</h3>
+      <ul>
+        <li>Inspect new plants before entry. Quarantine 7–10 days if possible.</li>
+        <li>Keep floor dry. Remove leaf litter.</li>
+        <li>Run intake through filter. Clean fans monthly.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="sensors">11) Sensors & Automation</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Useful Sensors</h3>
+      <ul>
+        <li>PAR/PPFD meter: tune dimmer/height to targets.</li>
+        <li>Temp/RH sensors at canopy and root zone.</li>
+        <li>Soil moisture probes per pot.</li>
+        <li>Lux sensor for relative light stability checks.</li>
+        <li>Camera for time‑lapse and growth tracking.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Automation Ideas</h3>
+      <ul>
+        <li>Fan speed tied to RH or leaf temp thresholds.</li>
+        <li>Irrigation timers with moisture‑based overrides.</li>
+        <li>Alert on RH > 70 % during flowering.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="schedules">12) Daily/Weekly Schedules</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Daily</h3>
+      <ul>
+        <li>AM: Check canopy temp/RH, inspect buds, confirm fan operation.</li>
+        <li>Midday: Verify PPFD at canopy; rotate pots if needed.</li>
+        <li>PM: Water if pot mass indicates; log runoff EC if fertigating.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Weekly</h3>
+      <ul>
+        <li>Wipe tent walls and light bars. Replace yellow sticky cards.</li>
+        <li>Light training adjustments; re‑tie branches.</li>
+        <li>Flush with plain water if EC climbs above target.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="troubleshooting">13) Troubleshooting</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Low Yield</h3>
+      <ul>
+        <li>Increase PPFD to 500–600 if temps allow.</li>
+        <li>Reduce RH to 50–55 % during peak flower.</li>
+        <li>Check Ca/Mg levels and steady irrigation cadence.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Leaf Burn</h3>
+      <ul>
+        <li>Raise light or dim 10–20 % until margins recover.</li>
+        <li>Verify that runoff EC is not excessive.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="harvest">14) Harvest & Postharvest</h2>
+  <ul>
+    <li>Pick green jalapeños for crunch; allow color for sweeter heat.</li>
+    <li>Superhots require full color and waxy firmness; be patient.</li>
+    <li>Do not strip the plant bare at once; stagger harvest for continued set.</li>
+  </ul>
+
+  <h2 id="calc">Appendix A: Power & Cost</h2>
+  <div class="grid-2-1">
+    <div class="card">
+      <h3>Formulas</h3>
+      <pre><code>Daily kWh ≈ (Wattage × hours) ÷ 1000
+Monthly kWh ≈ Daily kWh × 30
+Monthly cost ≈ Monthly kWh × local $/kWh</code></pre>
+    </div>
+    <div class="card">
+      <h3>Example (600 W @ 16 h)</h3>
+      <ul>
+        <li>Daily kWh ≈ 0.6 × 16 = 9.6 kWh</li>
+        <li>Monthly kWh ≈ 9.6 × 30 = 288 kWh</li>
+        <li>At $0.12/kWh → ≈ $34.56 per month</li>
+      </ul>
+      <p class="small muted">Substitute your local rate.</p>
+    </div>
+  </div>
+
+  <h2 id="ref">Appendix B: Reference Quick‑Sheet</h2>
+  <table>
+    <thead><tr><th>Item</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td>Photoperiod</td><td>14–16 h constant</td></tr>
+      <tr><td>PPFD</td><td>400–600 at canopy</td></tr>
+      <tr><td>RH</td><td>50–65 %</td></tr>
+      <tr><td>Temp</td><td>24–28 °C day / 18–22 °C night</td></tr>
+      <tr><td>Pot size</td><td>3–7 gal (annuum) / 5–10 gal (chinense/superhot)</td></tr>
+      <tr><td>Spacing</td><td>30–45 cm between main stems</td></tr>
+    </tbody>
+  </table>
+
+  <div class="hr"></div>
+  <p class="small muted">This document is black‑and‑white for clean printing. Verify actual PPFD/leaf temps for your fixture and tent.</p>
+</div>
+</body>
+</html>

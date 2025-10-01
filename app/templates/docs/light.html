@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ESP32 + BH1750 → Flask JSON: Design & Implementation Guide</title>
+<style>
+  :root {
+    --fg: #111;
+    --bg: #fff;
+    --muted: #666;
+    --rule: #000;
+  }
+  html, body { background: var(--bg); color: var(--fg); margin: 0; padding: 0; }
+  body { font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1, h2, h3 { line-height: 1.25; margin: 28px 0 10px; }
+  h1 { font-size: 28px; }
+  h2 { font-size: 22px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+  h3 { font-size: 18px; }
+  p { margin: 10px 0 12px; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  pre { background: #f6f6f6; color: #000; border: 1px solid #000; padding: 14px; overflow:auto; }
+  kbd { border: 1px solid #000; padding: 2px 4px; font-size: 0.9em; }
+  .muted { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .grid-2-1 { display:grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+  .card { border: 1px solid var(--rule); padding: 14px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; }
+  th, td { border: 1px solid #000; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f0f0f0; }
+  ul { margin: 8px 0 12px 20px; }
+  ol { margin: 8px 0 12px 20px; }
+  .toc a { text-decoration: none; color: inherit; }
+  .toc li { margin: 4px 0; }
+  .callout { border: 1px solid #000; padding: 10px 12px; background: #fafafa; }
+  .small { font-size: 12px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  .hr { border-top: 2px solid #000; margin: 18px 0; }
+  @media print {
+    a[href]:after { content: " (" attr(href) ")"; font-size: 11px; }
+    .wrap { padding: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ESP32 + BH1750 → Flask JSON<br><span class="muted">Design & Implementation Guide</span></h1>
+  <p class="muted">Monochrome, print-ready documentation. Emphasis on wiring, I²C behavior, timing, and HTTP payloads.</p>
+
+  <h2 id="toc">Contents</h2>
+  <ol class="toc">
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#bom">Bill of Materials</a></li>
+    <li><a href="#wiring">Wiring & Power</a></li>
+    <li><a href="#i2c">I²C Addressing & Modes</a></li>
+    <li><a href="#network">Network & Endpoint</a></li>
+    <li><a href="#payload">Payload Contract</a></li>
+    <li><a href="#build">Build & Flash (Arduino IDE)</a></li>
+    <li><a href="#behavior">Runtime Behavior</a></li>
+    <li><a href="#timing">Timing & Throughput</a></li>
+    <li><a href="#code">Full Sketch</a></li>
+    <li><a href="#logs">Expected Serial Logs</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+    <li><a href="#validation">Validation Checklist</a></li>
+    <li><a href="#security">Security & Hardening</a></li>
+    <li><a href="#ext">Extensions & Variations</a></li>
+    <li><a href="#specs">BH1750 Quick Specs</a></li>
+  </ol>
+
+  <h2 id="overview">1) Overview</h2>
+  <p>This firmware reads illuminance (lux) from a BH1750 ambient light sensor over I²C and posts one JSON record to a Flask route every 60 seconds. The sketch initializes I²C on SDA=21 and SCL=22, probes both standard BH1750 addresses (0x23 and 0x5C), performs a single high‑resolution measurement per cycle via <span class="mono">readLightLevel()</span>, and submits the lux value as a floating‑point number.</p>
+
+  <h2 id="bom">2) Bill of Materials</h2>
+  <table>
+    <thead><tr><th>Item</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>ESP32 DevKit (ESP‑WROOM‑32 or equivalent)</td><td>3.3&nbsp;V logic, integrated Wi‑Fi</td></tr>
+      <tr><td>BH1750 light sensor module</td><td>Common breakouts include pull‑ups and allow 3.3–5&nbsp;V input</td></tr>
+      <tr><td>Jumper wires</td><td>Male‑female for module headers</td></tr>
+      <tr><td>USB cable</td><td>Power and flashing</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="wiring">3) Wiring & Power</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Connections</h3>
+      <table>
+        <thead><tr><th>BH1750</th><th>ESP32</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>VCC</td><td>3V3</td><td>Use 3.3&nbsp;V on ESP32. Many breakouts tolerate 5&nbsp;V, but 3.3&nbsp;V is safest.</td></tr>
+          <tr><td>GND</td><td>GND</td><td>Common ground required.</td></tr>
+          <tr><td>SDA</td><td>GPIO&nbsp;21</td><td>I²C data line.</td></tr>
+          <tr><td>SCL</td><td>GPIO&nbsp;22</td><td>I²C clock line.</td></tr>
+          <tr><td>ADDR</td><td>GND or 3V3</td><td>GND → 0x23, 3V3 → 0x5C. Leave floating for 0x23 on many boards.</td></tr>
+        </tbody>
+      </table>
+      <p>Most BH1750 modules include ~10&nbsp;kΩ pull‑ups on SDA/SCL. If using a bare IC, add pull‑ups to 3V3.</p>
+    </div>
+    <div class="card">
+      <h3>Power Notes</h3>
+      <ul>
+        <li>Typical BH1750 current is ~0.12&nbsp;mA active. Negligible versus ESP32.</li>
+        <li>Keep I²C runs short. Twisted SDA/GND and SCL/GND pairs help in noisy environments.</li>
+        <li>If multiple I²C devices share the bus, ensure a single effective pull‑up per line.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="i2c">4) I²C Addressing & Modes</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Addresses</h3>
+      <ul>
+        <li><strong>0x23</strong>: ADDR low/floating (default on most modules).</li>
+        <li><strong>0x5C</strong>: ADDR tied high (to VCC).</li>
+      </ul>
+      <p>The sketch probes both and logs the detected address.</p>
+    </div>
+    <div class="card">
+      <h3>Measurement Mode</h3>
+      <ul>
+        <li><strong>Continuous High‑Resolution</strong> is used. Typical first conversion ~120–180&nbsp;ms.</li>
+        <li><span class="mono">readLightLevel()</span> returns a float in lux, scaled by internal MTreg.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="network">5) Network & Endpoint</h2>
+  <table>
+    <tbody>
+      <tr><th>Wi‑Fi SSID</th><td><code>4301b</code></td></tr>
+      <tr><th>Wi‑Fi Password</th><td><code>scoutdog1</code></td></tr>
+      <tr><th>HTTP Method</th><td><code>POST</code></td></tr>
+      <tr><th>Content‑Type</th><td><code>application/json</code></td></tr>
+      <tr><th>Endpoint</th><td><code>http://192.168.50.243:5001/add_data</code></td></tr>
+      <tr><th>Timeout</th><td>5&nbsp;s (client‑side)</td></tr>
+      <tr><th>Interval</th><td>Every 60&nbsp;s (one POST per cycle)</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="payload">6) Payload Contract</h2>
+  <p>The Flask route expects the following JSON keys. <span class="mono">plant_id</span> is an integer in this build.</p>
+  <div class="card">
+    <pre><code>{
+  "sensor_type": "bh1750_lux",
+  "reading": 123.45,     // float (lux)
+  "plant_id": 1          // int
+}</code></pre>
+  </div>
+  <p class="small muted">Server success responses are HTTP 200 or 201. Other codes are logged to Serial.</p>
+
+  <h2 id="build">7) Build & Flash (Arduino IDE)</h2>
+  <ol>
+    <li>Install ESP32 board support via <span class="mono">Boards Manager</span> (Espressif Systems).</li>
+    <li>Libraries:
+      <ul>
+        <li><strong>BH1750</strong> by Christopher Laws.</li>
+      </ul>
+    </li>
+    <li>Board: <span class="mono">ESP32 Dev Module</span> (or your specific variant).</li>
+    <li>Set COM/tty port.</li>
+    <li>Edit <em>User Config</em> block:
+      <ul>
+        <li><span class="mono">WIFI_SSID</span>, <span class="mono">WIFI_PASS</span></li>
+        <li><span class="mono">SERVER_URL</span>, <span class="mono">SENSOR_TYPE</span>, <span class="mono">PLANT_ID</span></li>
+        <li><span class="mono">I2C_SDA</span>=21, <span class="mono">I2C_SCL</span>=22</li>
+        <li><span class="mono">POST_INTERVAL_MS</span>=60000</li>
+      </ul>
+    </li>
+    <li>Compile and upload. Open <span class="mono">Serial Monitor</span> at 115200 baud.</li>
+  </ol>
+
+  <h2 id="behavior">8) Runtime Behavior</h2>
+  <div class="grid-2-1">
+    <div class="card">
+      <h3>State Flow</h3>
+      <ol>
+        <li><strong>Boot</strong>: Start Serial → init I²C → probe BH1750 (0x23 then 0x5C) → connect Wi‑Fi.</li>
+        <li><strong>Cycle</strong> (once per minute):
+          <ol>
+            <li>Single high‑res lux read with <span class="mono">readLightLevel()</span>.</li>
+            <li>Clamp negative values to zero; treat <span class="mono">NaN</span> as invalid.</li>
+            <li>POST JSON payload to Flask route.</li>
+          </ol>
+        </li>
+        <li><strong>Connectivity</strong>: If Wi‑Fi drops, reconnect before next cycle.</li>
+      </ol>
+    </div>
+    <div class="card">
+      <h3>Design Notes</h3>
+      <ul>
+        <li>No rolling average. One measurement per cycle reduces latency and server write volume.</li>
+        <li>Address probing supports both common module wirings (ADDR low or high).</li>
+        <li>180&nbsp;ms delay after begin ensures first valid conversion in continuous mode.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="timing">9) Timing & Throughput</h2>
+  <table>
+    <thead><tr><th>Parameter</th><th>Value</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>POST interval</td><td>60&nbsp;s</td><td>One HTTP request per interval</td></tr>
+      <tr><td>Mode</td><td>Continuous High‑Resolution</td><td>~120–180&nbsp;ms first conversion</td></tr>
+      <tr><td>HTTP timeout</td><td>5&nbsp;s</td><td>Client abort if server unresponsive</td></tr>
+      <tr><td>Loop idle</td><td>50&nbsp;ms</td><td>Cooperative multitasking</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="code">10) Full Sketch</h2>
+  <pre><code>/*
+  ESP32 DevKit + BH1750 -> Flask JSON (every 60s)
+  - Reads lux once per cycle using BH1750::readLightLevel()
+  - Posts JSON: {"sensor_type": "...", "reading": &lt;float&gt;, "plant_id": &lt;int&gt;}
+  - Pins: SDA=21, SCL=22 (per your hardware)
+  - Library: "BH1750" by Christopher Laws (Library Manager)
+*/
+
+#include &lt;WiFi.h&gt;
+#include &lt;HTTPClient.h&gt;
+#include &lt;Wire.h&gt;
+#include &lt;BH1750.h&gt;
+
+// ---------- USER CONFIG (edit these) ----------
+const char* WIFI_SSID   = "4301b";   // e.g. "4301b"
+const char* WIFI_PASS   = "scoutdog1";   // e.g. "scoutdog1"
+
+const char* SERVER_URL  = "http://192.168.50.243:5001/add_data"; // your Flask route
+const char* SENSOR_TYPE = "bh1750_lux";                           // keep as given
+const int   PLANT_ID    = 1;                                      // adjust for plant
+
+// Post once per minute
+constexpr unsigned long POST_INTERVAL_MS = 60UL * 1000UL;
+
+// I2C wiring for ESP32 DevKit (per your note)
+constexpr uint8_t I2C_SDA = 21;
+constexpr uint8_t I2C_SCL = 22;
+
+// ---------- Globals ----------
+BH1750 lightMeter;
+unsigned long lastPostMs = 0;
+
+// ---------- Forward decls ----------
+void connectWiFi();
+void ensureWiFiConnected();
+bool initBH1750();
+float readLuxOnce();
+bool postReading(float lux);
+
+// ---------- Setup ----------
+void setup() {
+  Serial.begin(115200);
+  delay(150);
+  Serial.println("\n[BOOT] ESP32 BH1750 -> Flask JSON (60s)");
+
+  // Init I2C on the pins you specified
+  Wire.begin(I2C_SDA, I2C_SCL);
+  Serial.printf("[I2C] SDA=%u SCL=%u\n", I2C_SDA, I2C_SCL);
+
+  // Bring up sensor. Try 0x23 then 0x5C to cover ADDR pin wiring.
+  if (!initBH1750()) {
+    Serial.println("[SENSOR] BH1750 init failed. Halting.");
+    while (true) { delay(1000); }
+  }
+
+  // Wi-Fi
+  connectWiFi();
+
+  // Trigger immediate first POST
+  lastPostMs = 0;
+  Serial.println("[BOOT] Ready.");
+}
+
+// ---------- Loop ----------
+void loop() {
+  ensureWiFiConnected();
+
+  unsigned long now = millis();
+  if (lastPostMs == 0 || (now - lastPostMs) &gt;= POST_INTERVAL_MS) {
+    lastPostMs = now;
+
+    // Single measurement per your requirement
+    float lux = readLuxOnce();
+    Serial.printf("[READ] lux=%.2f\n", lux);
+
+    // Push to Flask route
+    bool ok = postReading(lux);
+    Serial.printf("[POST] %s\n", ok ? "OK" : "FAIL");
+  }
+
+  delay(50); // keep CPU cool, maintain responsiveness
+}
+
+// ---------- Wi-Fi helpers ----------
+void connectWiFi() {
+  Serial.printf("[WIFI] Connecting to SSID: %s\n", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+    if (millis() - start &gt; 20000) { // 20s retry window
+      Serial.println("\n[WIFI] Timeout. Re-attempting.");
+      WiFi.disconnect(true);
+      WiFi.begin(WIFI_SSID, WIFI_PASS);
+      start = millis();
+    }
+  }
+  Serial.printf("\n[WIFI] Connected. IP=%s\n", WiFi.localIP().toString().c_str());
+}
+
+void ensureWiFiConnected() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[WIFI] Disconnected. Reconnecting.");
+    connectWiFi();
+  }
+}
+
+// ---------- Sensor helpers ----------
+bool initBH1750() {
+  // Give sensor power-up time
+  delay(150);
+
+  // Try default 0x23 first
+  if (lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x23, &Wire)) {
+    Serial.println("[SENSOR] BH1750 detected at 0x23");
+    // Spec: first valid conversion ~120–180 ms in high-res
+    delay(180);
+    return true;
+  }
+
+  // Fallback to 0x5C if ADDR tied high
+  if (lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x5C, &Wire)) {
+    Serial.println("[SENSOR] BH1750 detected at 0x5C");
+    delay(180);
+    return true;
+  }
+
+  Serial.println("[SENSOR] BH1750 not found on 0x23 or 0x5C. Check wiring/power.");
+  return false;
+}
+
+float readLuxOnce() {
+  // Simple single call per your request. No rolling average.
+  float lux = lightMeter.readLightLevel(); // returns lux as float
+  if (isnan(lux)) {
+    Serial.println("[READ] NaN from sensor. Returning -1.");
+    return -1.0f;
+  }
+  if (lux &lt; 0.0f) lux = 0.0f; // clamp negatives
+  return lux;
+}
+
+// ---------- HTTP POST ----------
+bool postReading(float lux) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[HTTP] No Wi-Fi. Abort.");
+    return false;
+  }
+
+  WiFiClient client;  // plain HTTP
+  HTTPClient http;
+  http.setTimeout(5000); // 5s
+
+  if (!http.begin(client, SERVER_URL)) {
+    Serial.println("[HTTP] http.begin() failed");
+    return false;
+  }
+
+  http.addHeader("Content-Type", "application/json");
+
+  // Flask expects: sensor_type (string), reading (float), plant_id (int/string)
+  String payload = String("{\"sensor_type\":\"") + SENSOR_TYPE +
+                   "\",\"reading\":" + String(lux, 2) +
+                   ",\"plant_id\":" + String(PLANT_ID) + "}";
+
+  Serial.print("[HTTP] POST payload: ");
+  Serial.println(payload);
+
+  int code = http.POST(payload);
+  Serial.printf("[HTTP] Status: %d\n", code);
+
+  String resp = http.getString();
+  Serial.print("[HTTP] Response: ");
+  Serial.println(resp);
+
+  http.end();
+  return (code == 201 || code == 200);
+}</code></pre>
+
+  <h2 id="logs">11) Expected Serial Logs</h2>
+  <pre><code>[BOOT] ESP32 BH1750 -> Flask JSON (60s)
+[I2C] SDA=21 SCL=22
+[SENSOR] BH1750 detected at 0x23
+[WIFI] Connecting to SSID: 4301b
+....
+[WIFI] Connected. IP=192.168.50.xxx
+[BOOT] Ready.
+[READ] lux=123.45
+[HTTP] POST payload: {"sensor_type":"bh1750_lux","reading":123.45,"plant_id":1}
+[HTTP] Status: 201
+[HTTP] Response: {"success": true}
+[POST] OK
+</code></pre>
+
+  <h2 id="troubleshooting">12) Troubleshooting</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>No Sensor Detected</h3>
+      <ul>
+        <li>Run an I²C scanner to confirm address (0x23 or 0x5C).</li>
+        <li>Check SDA/SCL orientation; swap if needed.</li>
+        <li>Verify ADDR pin state matches expected address.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Unstable Lux Values</h3>
+      <ul>
+        <li>Shield sensor from direct LED flicker; try diffusing cover.</li>
+        <li>Use continuous high‑res mode; avoid rapid re‑init.</li>
+        <li>Optionally median‑filter on server side.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Wi‑Fi / HTTP Failures</h3>
+      <ul>
+        <li>Check credentials and 2.4&nbsp;GHz availability.</li>
+        <li>Ping the Flask host from another device.</li>
+        <li>Inspect server logs for request errors.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Units & Scaling</h3>
+      <ul>
+        <li>BH1750 outputs lux directly; no extra scaling needed with standard MTreg.</li>
+        <li>Clamp negative or NaN readings as the sketch does.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="validation">13) Validation Checklist</h2>
+  <ul>
+    <li>I²C scanner finds BH1750 at 0x23 or 0x5C.</li>
+    <li>Serial shows successful Wi‑Fi connection.</li>
+    <li>One HTTP 200/201 per minute.</li>
+    <li>Database row contains <span class="mono">sensor_type="bh1750_lux"</span> and plausible lux value.</li>
+  </ul>
+
+  <h2 id="security">14) Security & Hardening</h2>
+  <ul>
+    <li>Using plain HTTP on LAN. For WAN, put Flask behind TLS.</li>
+    <li>Add a shared token header (e.g., <span class="mono">X-API-Key</span>) and verify server‑side.</li>
+    <li>Rate‑limit or authenticate if deploying multiple nodes.</li>
+  </ul>
+
+  <h2 id="ext">15) Extensions & Variations</h2>
+  <ul>
+    <li>Adjust sensitivity via MTreg if your library exposes it (e.g., darker environments).</li>
+    <li>Batch readings or include device metadata in payload if schema evolves.</li>
+    <li>Sleep ESP32 between cycles to lower power draw.</li>
+    <li>Combine with DHTxx or other I²C sensors on the same bus.</li>
+  </ul>
+
+  <h2 id="specs">16) BH1750 Quick Specs</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Illuminance range</td><td>~1 to 65,535&nbsp;lux</td></tr>
+      <tr><td>Resolution</td><td>~1&nbsp;lux (high‑res), ~4&nbsp;lux (low‑res)</td></tr>
+      <tr><td>Supply</td><td>2.4–3.6&nbsp;V IC (many modules accept 3.3–5&nbsp;V)</td></tr>
+      <tr><td>Interface</td><td>I²C up to 400&nbsp;kHz</td></tr>
+      <tr><td>Typical current</td><td>~0.12&nbsp;mA active</td></tr>
+      <tr><td>Addresses</td><td>0x23 (ADDR low), 0x5C (ADDR high)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="hr"></div>
+  <p class="small muted">This document is intentionally black‑and‑white for clean printing and photocopying.</p>
+</div>
+</body>
+</html>

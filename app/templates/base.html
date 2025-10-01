@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Greenhouse Dashboard{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  {% block head_extra %}{% endblock %}
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .card { background-color: rgb(30 41 59); border-radius: 0.75rem; padding:1.25rem; box-shadow:0 4px 6px -1px rgba(0,0,0,.4); border:1px solid rgb(51 65 85); }
+    .value { font-size:2.25rem; line-height:2.5rem; font-weight:600; color: #f1f5f9; }
+    .label { color:#94a3b8; text-transform:uppercase; letter-spacing:.05em; font-size:.75rem; }
+    .tab-active { background-color: rgb(30 41 59); color:#f1f5f9; }
+    .logo-pepper { width:32px; height:32px; }
+  </style>
+  {% block styles %}{% endblock %}
+</head>
+<body class="h-full bg-slate-900 text-slate-100 flex flex-col min-h-screen">
+  <!-- Title Bar -->
+  <header class="w-full border-b border-slate-800 bg-slate-950/70 backdrop-blur supports-[backdrop-filter]:bg-slate-950/50">
+    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-6">
+        <a href="/" class="flex items-center gap-2 group">
+          <!-- Logo holder: place your own static/logo.svg file (app/static/logo.svg) -->
+          <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" class="h-8 w-8 select-none" onerror="this.style.display='none'" />
+          <span class="text-xl font-semibold tracking-tight bg-gradient-to-r from-emerald-400 to-cyan-400 text-transparent bg-clip-text group-hover:from-emerald-300 group-hover:to-cyan-300 transition">Indoor Greenhouse</span>
+        </a>
+        <nav class="hidden md:flex items-center gap-4 text-sm">
+          <a href="{{ url_for('main.index') }}" class="px-3 py-1 rounded hover:bg-slate-800/70 {% if request.path == '/' %}bg-slate-800 text-slate-100{% else %}text-slate-400 hover:text-slate-200{% endif %}">Dashboard</a>
+          <a href="{{ url_for('main.settings') }}" class="px-3 py-1 rounded hover:bg-slate-800/70 {% if request.path.startswith('/settings') %}bg-slate-800 text-slate-100{% else %}text-slate-400 hover:text-slate-200{% endif %}">Settings</a>
+          <a href="{{ url_for('main.camera_page') }}" class="px-3 py-1 rounded hover:bg-slate-800/70 {% if request.path.startswith('/camera') %}bg-slate-800 text-slate-100{% else %}text-slate-400 hover:text-slate-200{% endif %}">Camera</a>
+          <a href="{{ url_for('main.docs') }}" class="px-3 py-1 rounded hover:bg-slate-800/70 {% if request.path.startswith('/docs') %}bg-slate-800 text-slate-100{% else %}text-slate-400 hover:text-slate-200{% endif %}">Documentation</a>
+        </nav>
+        <!-- Mobile hamburger -->
+        <button id="mobileMenuBtn" class="md:hidden inline-flex items-center justify-center rounded-lg p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500" aria-label="Open menu" aria-expanded="false">
+          <svg id="mobileMenuIconOpen" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+          <svg id="mobileMenuIconClose" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="flex items-center gap-4">
+        {% block header_actions %}{% endblock %}
+      </div>
+    </div>
+    <!-- Mobile dropdown panel -->
+    <div id="mobileMenu" class="md:hidden hidden border-t border-slate-800 bg-slate-950/95 backdrop-blur px-6 py-4 space-y-2">
+      <a href="{{ url_for('main.index') }}" class="block px-3 py-2 rounded-md text-sm font-medium {% if request.path == '/' %}bg-slate-800 text-slate-100{% else %}text-slate-300 hover:bg-slate-800/70{% endif %}">Dashboard</a>
+      <a href="{{ url_for('main.settings') }}" class="block px-3 py-2 rounded-md text-sm font-medium {% if request.path.startswith('/settings') %}bg-slate-800 text-slate-100{% else %}text-slate-300 hover:bg-slate-800/70{% endif %}">Settings</a>
+      <a href="{{ url_for('main.camera_page') }}" class="block px-3 py-2 rounded-md text-sm font-medium {% if request.path.startswith('/camera') %}bg-slate-800 text-slate-100{% else %}text-slate-300 hover:bg-slate-800/70{% endif %}">Camera</a>
+      <a href="{{ url_for('main.docs') }}" class="block px-3 py-2 rounded-md text-sm font-medium {% if request.path.startswith('/docs') %}bg-slate-800 text-slate-100{% else %}text-slate-300 hover:bg-slate-800/70{% endif %}">Documentation</a>
+      <!-- Optional: replicate header actions on mobile -->
+      <div class="pt-3 mt-3 border-t border-slate-800">
+        {% block header_actions_mobile %}{% endblock %}
+      </div>
+    </div>
+  </header>
+
+  <div class="flex-1 w-full">
+    <main class="max-w-7xl mx-auto px-6 py-8">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <footer class="w-full border-t border-slate-800 bg-slate-950/70 backdrop-blur py-4 mt-auto">
+    <div class="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-2 text-sm text-slate-400">
+        <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo" class="h-6 w-6" onerror="this.style.display='none'" />
+        <span class="font-medium tracking-wide">Apache Growers</span>
+        <span class="text-slate-600">&middot;</span>
+        <span>&copy; <span id="yearSpan"></span></span>
+      </div>
+      <div class="text-xs text-slate-500">Monitoring the microclimate</div>
+    </div>
+  </footer>
+  <script>
+    document.getElementById('yearSpan').textContent = new Date().getFullYear();
+    (function(){
+      const btn = document.getElementById('mobileMenuBtn');
+      const panel = document.getElementById('mobileMenu');
+      if(!btn || !panel) return;
+      const iconOpen = document.getElementById('mobileMenuIconOpen');
+      const iconClose = document.getElementById('mobileMenuIconClose');
+      function closeMenu(){
+        panel.classList.add('hidden');
+        iconOpen.classList.remove('hidden');
+        iconClose.classList.add('hidden');
+        btn.setAttribute('aria-expanded','false');
+      }
+      function openMenu(){
+        panel.classList.remove('hidden');
+        iconOpen.classList.add('hidden');
+        iconClose.classList.remove('hidden');
+        btn.setAttribute('aria-expanded','true');
+      }
+      btn.addEventListener('click', ()=>{
+        const isOpen = btn.getAttribute('aria-expanded') === 'true';
+        isOpen ? closeMenu() : openMenu();
+      });
+      document.addEventListener('click', (e)=>{
+        if(!panel.contains(e.target) && !btn.contains(e.target)) closeMenu();
+      });
+      window.addEventListener('resize', ()=>{
+        if(window.innerWidth >= 768) closeMenu();
+      });
+      document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeMenu(); });
+    })();
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

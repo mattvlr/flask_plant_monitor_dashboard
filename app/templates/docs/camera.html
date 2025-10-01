@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M5Stack Timer Camera F (OV3660) → HTTP Snapshot Server: Design & Ops Guide</title>
+<style>
+  :root {
+    --fg: #111;
+    --bg: #fff;
+    --muted: #666;
+    --rule: #000;
+  }
+  html, body { background: var(--bg); color: var(--fg); margin: 0; padding: 0; }
+  body { font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1, h2, h3 { line-height: 1.25; margin: 28px 0 10px; }
+  h1 { font-size: 28px; }
+  h2 { font-size: 22px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+  h3 { font-size: 18px; }
+  p { margin: 10px 0 12px; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  pre { background: #f6f6f6; color: #000; border: 1px solid #000; padding: 14px; overflow:auto; }
+  kbd { border: 1px solid #000; padding: 2px 4px; font-size: 0.9em; }
+  .muted { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .grid-2-1 { display:grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+  .card { border: 1px solid var(--rule); padding: 14px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; }
+  th, td { border: 1px solid #000; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f0f0f0; }
+  ul { margin: 8px 0 12px 20px; }
+  ol { margin: 8px 0 12px 20px; }
+  .toc a { text-decoration: none; color: inherit; }
+  .toc li { margin: 4px 0; }
+  .callout { border: 1px solid #000; padding: 10px 12px; background: #fafafa; }
+  .small { font-size: 12px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  .hr { border-top: 2px solid #000; margin: 18px 0; }
+  @media print {
+    a[href]:after { content: " (" attr(href) ")"; font-size: 11px; }
+    .wrap { padding: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>M5Stack Timer Camera F (OV3660) → HTTP Snapshot Server<br><span class="muted">Design & Ops Guide</span></h1>
+  <p class="muted">Monochrome, print-ready documentation. Emphasis on camera wiring, JPEG tuning, HTTP endpoints, and admin controls. Targets infrequent, high-quality captures.</p>
+
+  <h2 id="toc">Contents</h2>
+  <ol class="toc">
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#hardware">Hardware & Camera</a></li>
+    <li><a href="#pins">Pin Map (Timer Camera F)</a></li>
+    <li><a href="#build">Build & Flash (Arduino IDE)</a></li>
+    <li><a href="#wifi">Wi-Fi & Boot</a></li>
+    <li><a href="#routes">Network & Routes</a></li>
+    <li><a href="#params">Admin Parameters</a></li>
+    <li><a href="#quality">Quality, Framesize & PSRAM</a></li>
+    <li><a href="#usage">Usage Examples</a></li>
+    <li><a href="#behavior">Runtime Behavior</a></li>
+    <li><a href="#logs">Expected Serial Logs</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+    <li><a href="#validation">Validation Checklist</a></li>
+    <li><a href="#security">Security & Hardening</a></li>
+    <li><a href="#ext">Extensions & Variations</a></li>
+    <li><a href="#code">Full Sketch</a></li>
+  </ol>
+
+  <h2 id="overview">1) Overview</h2>
+  <p>HTTP server on ESP32 for single-shot JPEGs from the OV3660 sensor in the M5Stack Timer Camera F. Routes include a snapshot endpoint and admin controls to read status, adjust framesize/quality, flip/mirror, toggle the LED, and reboot or re-init the camera. Design favors larger frames and higher quality because captures are infrequent.</p>
+
+  <h2 id="hardware">2) Hardware & Camera</h2>
+  <table>
+    <thead><tr><th>Item</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>M5Stack Timer Camera F</td><td>OV3660 sensor module, ESP32, on-board LED on GPIO&nbsp;2</td></tr>
+      <tr><td>Power</td><td>Stable 5&nbsp;V input via USB. Avoid brownouts during Wi-Fi TX + capture spikes.</td></tr>
+      <tr><td>PSRAM</td><td>Recommended. Enables higher frames and double frame buffers.</td></tr>
+      <tr><td>Wi-Fi</td><td>2.4&nbsp;GHz STA mode. Credentials set in sketch.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="pins">3) Pin Map (Timer Camera F)</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Camera signals</h3>
+      <table>
+        <thead><tr><th>Signal</th><th>GPIO</th><th>Signal</th><th>GPIO</th></tr></thead>
+        <tbody>
+          <tr><td>D0..D7</td><td>32,35,34,5,39,18,36,19</td><td>VSYNC</td><td>22</td></tr>
+          <tr><td>HREF</td><td>26</td><td>PCLK</td><td>21</td></tr>
+          <tr><td>XCLK</td><td>27</td><td>SCCB SDA/SCL</td><td>25 / 23</td></tr>
+          <tr><td>PWDN</td><td>-1</td><td>RESET</td><td>15</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Misc</h3>
+      <ul>
+        <li>LED GPIO: <strong>2</strong> (on-board status LED).</li>
+        <li>XCLK: 20&nbsp;MHz for OV3660 stability.</li>
+        <li>Brownout detect disabled in code to prevent resets under load.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="build">4) Build & Flash (Arduino IDE)</h2>
+  <ol>
+    <li>Install <span class="mono">ESP32</span> core by Espressif via Boards Manager.</li>
+    <li>Board: <span class="mono">ESP32 Dev Module</span>. PSRAM: <span class="mono">Enabled</span>. Partition: <span class="mono">Default</span> or <span class="mono">Huge APP</span>.</li>
+    <li>Libraries: bundled <span class="mono">esp32-camera</span> (from ESP32 core).</li>
+    <li>Set Wi-Fi credentials in <span class="mono">WIFI_SSID</span>/<span class="mono">WIFI_PASS</span>.</li>
+    <li>Compile, upload, open Serial at <span class="mono">115200</span>.</li>
+  </ol>
+
+  <h2 id="wifi">5) Wi-Fi & Boot</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Behavior</h3>
+      <ul>
+        <li>STA join with 30&nbsp;s timeout. On timeout, device restarts.</li>
+        <li>On connect, logs IP and RSSI. Starts HTTP on port 80.</li>
+        <li>PSRAM present → higher default framesize and double buffering.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Defaults</h3>
+      <table>
+        <thead><tr><th>Key</th><th>Default</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>framesize</td><td>UXGA (1600×1200)</td><td>QXGA (2048×1536) if defined and PSRAM present</td></tr>
+          <tr><td>quality</td><td>10</td><td>Lower is better quality in driver (range 5..63)</td></tr>
+          <tr><td>fb_count</td><td>2</td><td>With PSRAM. Else 1.</td></tr>
+          <tr><td>pixel_format</td><td>JPEG</td><td>Single image per request</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <h2 id="routes">6) Network & Routes</h2>
+  <table>
+    <thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Response</th></tr></thead>
+    <tbody>
+      <tr><td>GET</td><td><code>/</code></td><td>Tiny test page with live image</td><td><code>text/html</code></td></tr>
+      <tr><td>GET</td><td><code>/snapshot</code></td><td>Fresh JPEG</td><td><code>image/jpeg</code>, no-cache headers</td></tr>
+      <tr><td>GET</td><td><code>/admin/status</code></td><td>Device + camera status</td><td><code>application/json</code></td></tr>
+      <tr><td>GET</td><td><code>/admin/set</code></td><td>Set params</td><td><code>text/plain</code> summary</td></tr>
+      <tr><td>GET</td><td><code>/admin/led?on=0|1</code></td><td>LED control</td><td><code>text/plain</code></td></tr>
+      <tr><td>GET</td><td><code>/admin/reboot</code></td><td>Soft reboot</td><td><code>text/plain</code></td></tr>
+      <tr><td>GET</td><td><code>/admin/restart_camera</code></td><td>Deinit + reinit sensor</td><td><code>text/plain</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="params">7) Admin Parameters</h2>
+  <div class="grid">
+    <div class="card">
+      <h3><code>/admin/set</code> query keys</h3>
+      <table>
+        <thead><tr><th>Key</th><th>Type</th><th>Values</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>framesize</td><td>enum</td><td>QQVGA, QCIF, HQVGA, QVGA, CIF, VGA, SVGA, XGA, SXGA, UXGA, QXGA*</td><td>*QXGA only if defined by core and supported</td></tr>
+          <tr><td>quality</td><td>int</td><td>5..63</td><td>Lower = better JPEG quality, larger file</td></tr>
+          <tr><td>vflip</td><td>bool</td><td>0 or 1</td><td>Vertical flip</td></tr>
+          <tr><td>hmirror</td><td>bool</td><td>0 or 1</td><td>Horizontal mirror</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Status JSON fields</h3>
+      <pre><code>{
+  "ip": "192.168.50.xxx",
+  "rssi_dbm": -62,
+  "uptime_ms": 1234567,
+  "free_heap": 183000,
+  "free_psram": 2123456,
+  "framesize": "UXGA",
+  "quality": 10,
+  "vflip": 0,
+  "hmirror": 0
+}</code></pre>
+      <p class="small muted">Use this for remote health checks and to confirm current optics settings.</p>
+    </div>
+  </div>
+
+  <h2 id="quality">8) Quality, Framesize & PSRAM</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Guidance</h3>
+      <ul>
+        <li>Enable PSRAM for large frames and double buffering.</li>
+        <li>If capture fails at high res, firmware steps down one tier and retries.</li>
+        <li>Use <span class="mono">quality=10..14</span> for inspection, <span class="mono">18..24</span> for smaller files.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Approximate frames</h3>
+      <table>
+        <thead><tr><th>Framesize</th><th>Pixels</th><th>Typical use</th></tr></thead>
+        <tbody>
+          <tr><td>QVGA</td><td>320×240</td><td>Quick checks, low bandwidth</td></tr>
+          <tr><td>VGA</td><td>640×480</td><td>General preview</td></tr>
+          <tr><td>SVGA/XGA</td><td>800×600 / 1024×768</td><td>Readable detail</td></tr>
+          <tr><td>SXGA</td><td>1280×1024</td><td>High detail without PSRAM</td></tr>
+          <tr><td>UXGA</td><td>1600×1200</td><td>High detail with PSRAM</td></tr>
+          <tr><td>QXGA*</td><td>2048×1536</td><td>Max detail if supported</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <h2 id="usage">9) Usage Examples</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Shell</h3>
+      <pre><code># Snapshot to file
+curl -sL http://&lt;ip&gt;/snapshot -o snap.jpg
+
+# Status JSON
+curl -s http://&lt;ip&gt;/admin/status | jq .
+
+# Set framesize + quality
+curl "http://&lt;ip&gt;/admin/set?framesize=UXGA&amp;quality=12"
+
+# Flip and mirror
+curl "http://&lt;ip&gt;/admin/set?vflip=1&amp;hmirror=1"
+
+# LED
+curl "http://&lt;ip&gt;/admin/led?on=1"</code></pre>
+    </div>
+    <div class="card">
+      <h3>Browser</h3>
+      <ul>
+        <li><code>http://&lt;ip&gt;/</code> opens a tiny page with a refresh button.</li>
+        <li><code>http://&lt;ip&gt;/snapshot?ts=&lt;unixms&gt;</code> busts caches.</li>
+      </ul>
+      <p class="small muted">Responses set <span class="mono">Cache-Control: no-store</span> and <span class="mono">Pragma: no-cache</span>.</p>
+    </div>
+  </div>
+
+  <h2 id="behavior">10) Runtime Behavior</h2>
+  <div class="grid-2-1">
+    <div class="card">
+      <h3>State Flow</h3>
+      <ol>
+        <li><strong>Boot</strong>: Choose defaults → init camera → connect Wi-Fi → start HTTP.</li>
+        <li><strong>Snapshot</strong>: Capture fb → stream JPEG to client → return buffer.</li>
+        <li><strong>Fallback</strong>: If capture fails, step down framesize once and retry.</li>
+      </ol>
+    </div>
+    <div class="card">
+      <h3>Design Notes</h3>
+      <ul>
+        <li>Direct write of JPEG to client to reduce copies.</li>
+        <li>Double buffer when PSRAM present improves responsiveness.</li>
+        <li>Admin camera restart avoids full reboot when sensor hangs.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="logs">11) Expected Serial Logs</h2>
+  <pre><code>[wifi] connecting to '4301b'
+.... 
+[wifi] connected: ip=192.168.50.xxx rssi=-60 dBm
+[cam] initializing...
+[cam] apply framesize=UXGA quality=10 vflip=0 hmirror=0
+[cam] sensor PID=0x3660
+[cam] OK
+[http] server started on :80
+[http] /snapshot
+[http] snapshot sent</code></pre>
+
+  <h2 id="troubleshooting">12) Troubleshooting</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Capture fails</h3>
+      <ul>
+        <li>Reduce framesize via <code>/admin/set?framesize=SXGA</code>.</li>
+        <li>Increase quality value (e.g., <code>quality=14</code>) to shrink JPEG.</li>
+        <li>Confirm PSRAM is enabled in board settings.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Reboots or brownouts</h3>
+      <ul>
+        <li>Use a stable 5&nbsp;V USB supply. Avoid long thin cables.</li>
+        <li>Avoid simultaneous heavy Wi-Fi traffic during capture.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Rotated/mirrored image</h3>
+      <ul>
+        <li>Fix orientation: <code>/admin/set?vflip=1</code> or <code>hmirror=1</code>.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>No web page</h3>
+      <ul>
+        <li>Check <code>/admin/status</code> for IP and heap.</li>
+        <li>Verify port 80 reachable from your LAN.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="validation">13) Validation Checklist</h2>
+  <ul>
+    <li>Serial shows camera init OK and Wi-Fi IP.</li>
+    <li><code>/snapshot</code> returns a valid JPEG with <code>Content-Type: image/jpeg</code>.</li>
+    <li><code>/admin/status</code> JSON fields populate and update over time.</li>
+    <li><code>/admin/set</code> echo shows changed framesize/quality.</li>
+  </ul>
+
+  <h2 id="security">14) Security & Hardening</h2>
+  <ul>
+    <li>LAN only by default. If exposing, put behind TLS reverse proxy.</li>
+    <li>Restrict admin routes by IP at the proxy. Add a shared key header if you extend firmware.</li>
+    <li>Disable root page in production if not needed.</li>
+  </ul>
+
+  <h2 id="ext">15) Extensions & Variations</h2>
+  <ul>
+    <li>Add <span class="mono">/admin/autocycle</span> to store periodic snapshots to SPIFFS/SD.</li>
+    <li>Expose a multipart MJPEG stream endpoint for preview.</li>
+    <li>Embed EXIF-like JSON in a sidecar route (time, framesize, quality).</li>
+  </ul>
+
+  <h2 id="code">16) Full Sketch</h2>
+  <pre><code>/*
+  M5Stack Timer Camera F (OV3660) — HTTP snapshot server with admin routes
+  - High-quality JPEG tuned for infrequent (15 min) captures.
+  - Routes:
+      GET /                      -> tiny test page with &lt;img src="/snapshot"&gt;
+      GET /snapshot              -> fresh JPEG (no cache)
+      GET /admin/status          -> JSON: ip, rssi, uptime, heap, psram, framesize, quality, flips
+      GET /admin/set             -> set params, e.g. /admin/set?framesize=UXGA&amp;quality=10&amp;vflip=0&amp;hmirror=1
+      GET /admin/led?on=1        -> LED on/off
+      GET /admin/reboot          -> ESP.restart()
+      GET /admin/restart_camera  -> deinit + reinit camera
+
+  Build (Arduino IDE):
+    Board: "ESP32 Dev Module"
+    PSRAM: "Enabled"  (recommended for large frames + double buffers)
+    Partition: "Default" or "Huge APP"
+    Upload Speed: any stable
+  Libraries:
+    - ESP32 core by Espressif
+    - esp32-camera (bundled with core or via library manager)
+
+  Set your Wi-Fi credentials below and flash. Open serial @115200 for logs.
+  Hit: http://&lt;device-ip&gt;/snapshot
+*/
+
+#include &lt;WiFi.h&gt;
+#include &lt;WebServer.h&gt;
+#include "esp_camera.h"
+#include "soc/soc.h"           // brownout disable
+#include "soc/rtc_cntl_reg.h"
+
+// ========= Wi-Fi =========
+// TODO: set these
+const char* WIFI_SSID = "4301b";
+const char* WIFI_PASS = "scoutdog1";
+
+// ========= LED / Status =========
+#define LED_GPIO 2  // TimerCam F onboard LED
+
+// ========= Timer Camera F (OV3660) pin map =========
+// Matches M5Stack Timer Camera F documentation
+#define CAM_PIN_PWDN   -1
+#define CAM_PIN_RESET  15
+#define CAM_PIN_XCLK   27
+#define CAM_PIN_SIOD   25
+#define CAM_PIN_SIOC   23
+
+#define CAM_PIN_D7     19
+#define CAM_PIN_D6     36
+#define CAM_PIN_D5     18
+#define CAM_PIN_D4     39
+#define CAM_PIN_D3      5
+#define CAM_PIN_D2     34
+#define CAM_PIN_D1     35
+#define CAM_PIN_D0     32
+
+#define CAM_PIN_VSYNC  22
+#define CAM_PIN_HREF   26
+#define CAM_PIN_PCLK   21
+
+WebServer server(80);
+
+// ========= Runtime settings (mutable via /admin/set) =========
+// Target: better quality since captures are infrequent.
+static framesize_t g_framesize = FRAMESIZE_UXGA; // 1600x1200 default
+static int g_quality = 10;                        // 10 = high quality (lower number = higher quality)
+static int g_vflip = 0;
+static int g_hmirror = 0;
+
+static unsigned long g_boot_ms = 0;
+
+// ========= Utilities =========
+static const char* framesizeToStr(framesize_t fs) {
+  switch (fs) {
+    case FRAMESIZE_QQVGA: return "QQVGA";
+    case FRAMESIZE_QCIF:  return "QCIF";
+    case FRAMESIZE_HQVGA: return "HQVGA";
+    case FRAMESIZE_QVGA:  return "QVGA";
+    case FRAMESIZE_CIF:   return "CIF";
+    case FRAMESIZE_VGA:   return "VGA";
+    case FRAMESIZE_SVGA:  return "SVGA";
+    case FRAMESIZE_XGA:   return "XGA";
+    case FRAMESIZE_SXGA:  return "SXGA";
+    case FRAMESIZE_UXGA:  return "UXGA";
+    #ifdef FRAMESIZE_QXGA
+    case FRAMESIZE_QXGA:  return "QXGA";
+    #endif
+    default:              return "UNKNOWN";
+  }
+}
+
+static bool strToFramesize(const String&amp; s, framesize_t&amp; out) {
+  String up = s; up.toUpperCase();
+       if (up == "QQVGA") out = FRAMESIZE_QQVGA;
+  else if (up == "QCIF")  out = FRAMESIZE_QCIF;
+  else if (up == "HQVGA") out = FRAMESIZE_HQVGA;
+  else if (up == "QVGA")  out = FRAMESIZE_QVGA;
+  else if (up == "CIF")   out = FRAMESIZE_CIF;
+  else if (up == "VGA")   out = FRAMESIZE_VGA;
+  else if (up == "SVGA")  out = FRAMESIZE_SVGA;
+  else if (up == "XGA")   out = FRAMESIZE_XGA;
+  else if (up == "SXGA")  out = FRAMESIZE_SXGA;
+  else if (up == "UXGA")  out = FRAMESIZE_UXGA;
+  #ifdef FRAMESIZE_QXGA
+  else if (up == "QXGA")  out = FRAMESIZE_QXGA;
+  #endif
+  else return false;
+  return true;
+}
+
+static void chooseDefaultsForQuality() {
+  // Push quality and resolution higher when PSRAM is present.
+  if (psramFound()) {
+    #ifdef FRAMESIZE_QXGA
+    g_framesize = FRAMESIZE_QXGA;   // 2048x1536 if supported
+    #else
+    g_framesize = FRAMESIZE_UXGA;   // 1600x1200 fallback
+    #endif
+    g_quality = 10;                  // high quality
+  } else {
+    g_framesize = FRAMESIZE_SXGA;    // 1280x1024 safer without PSRAM
+    g_quality = 12;
+  }
+  Serial.printf("[cfg] defaults: framesize=%s quality=%d (psram=%d)\n",
+                framesizeToStr(g_framesize), g_quality, (int)psramFound());
+}
+
+static void applySensorSettings() {
+  sensor_t* s = esp_camera_sensor_get();
+  if (!s) return;
+  s->set_framesize(s, g_framesize);
+  s->set_quality(s, g_quality);
+  s->set_vflip(s, g_vflip);
+  s->set_hmirror(s, g_hmirror);
+  Serial.printf("[cam] apply framesize=%s quality=%d vflip=%d hmirror=%d\n",
+                framesizeToStr(g_framesize), g_quality, g_vflip, g_hmirror);
+}
+
+static void startWiFi() {
+  Serial.printf("[wifi] connecting to '%s'\n", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(300);
+    Serial.print('.');
+    if (millis() - t0 &gt; 30000) {
+      Serial.println("\n[wifi] timeout, rebooting");
+      ESP.restart();
+    }
+  }
+  Serial.printf("\n[wifi] connected: ip=%s rssi=%d dBm\n",
+                WiFi.localIP().toString().c_str(), WiFi.RSSI());
+}
+
+static bool initCamera() {
+  // Disable brownout to avoid resets under Wi-Fi + camera spikes.
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
+  camera_config_t config = {};
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer   = LEDC_TIMER_0;
+  config.pin_d0       = CAM_PIN_D0;
+  config.pin_d1       = CAM_PIN_D1;
+  config.pin_d2       = CAM_PIN_D2;
+  config.pin_d3       = CAM_PIN_D3;
+  config.pin_d4       = CAM_PIN_D4;
+  config.pin_d5       = CAM_PIN_D5;
+  config.pin_d6       = CAM_PIN_D6;
+  config.pin_d7       = CAM_PIN_D7;
+  config.pin_xclk     = CAM_PIN_XCLK;
+  config.pin_pclk     = CAM_PIN_PCLK;
+  config.pin_vsync    = CAM_PIN_VSYNC;
+  config.pin_href     = CAM_PIN_HREF;
+  config.pin_sccb_sda = CAM_PIN_SIOD;
+  config.pin_sccb_scl = CAM_PIN_SIOC;
+  config.pin_pwdn     = CAM_PIN_PWDN;
+  config.pin_reset    = CAM_PIN_RESET;
+
+  config.xclk_freq_hz = 20000000;        // stable for OV3660
+  config.pixel_format = PIXFORMAT_JPEG;  // we return JPEGs
+  config.grab_mode    = CAMERA_GRAB_LATEST;
+
+  // Frame buffer allocation
+  if (psramFound()) {
+    config.frame_size   = g_framesize;
+    config.jpeg_quality = g_quality;
+    config.fb_count     = 2;                      // double buffer
+    config.fb_location  = CAMERA_FB_IN_PSRAM;
+  } else {
+    config.frame_size   = g_framesize;
+    config.jpeg_quality = g_quality;
+    config.fb_count     = 1;
+  }
+
+  Serial.println("[cam] initializing...");
+  esp_err_t err = esp_camera_init(&amp;config);
+  if (err != ESP_OK) {
+    Serial.printf("[cam] init failed: 0x%X\n", (unsigned)err);
+    return false;
+  }
+
+  applySensorSettings();
+
+  sensor_t* s = esp_camera_sensor_get();
+  if (s) {
+    Serial.printf("[cam] sensor PID=0x%X\n", s->id.PID);
+  }
+  Serial.println("[cam] OK");
+  return true;
+}
+
+// ========= HTTP Handlers =========
+static void handleRoot() {
+  String html;
+  html.reserve(1200);
+  html += "&lt;!doctype html&gt;&lt;html&gt;&lt;head&gt;&lt;meta name='viewport' content='width=device-width,initial-scale=1'&gt;";
+  html += "&lt;title&gt;TimerCamF Snapshot&lt;/title&gt;&lt;/head&gt;&lt;body style='font-family:sans-serif'&gt;";
+  html += "&lt;h3&gt;TimerCam-F&lt;/h3&gt;";
+  html += "&lt;p&gt;&lt;img id='img' src='/snapshot' style='max-width:100%'&gt;&lt;/p&gt;";
+  html += "&lt;button onclick=&quot;document.getElementById('img').src='/snapshot?ts='+Date.now()&quot;&gt;Refresh&lt;/button&gt;";
+  html += "&lt;p&gt;&lt;a href='/admin/status'&gt;status&lt;/a&gt; | &lt;a href='/admin/reboot'&gt;reboot&lt;/a&gt; | &lt;a href='/admin/restart_camera'&gt;restart_camera&lt;/a&gt;&lt;/p&gt;";
+  html += "&lt;p&gt;Example: /admin/set?framesize=UXGA&amp;quality=10&amp;vflip=0&amp;hmirror=1&lt;/p&gt;";
+  html += "&lt;/body&gt;&lt;/html&gt;";
+  server.send(200, "text/html", html);
+}
+
+static bool sendJpeg(camera_fb_t* fb) {
+  // Stream response to avoid extra copies
+  WiFiClient client = server.client();
+  client.printf(
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Type: image/jpeg\r\n"
+      "Content-Length: %u\r\n"
+      "Cache-Control: no-store, no-cache, must-revalidate, max-age=0\r\n"
+      "Pragma: no-cache\r\n"
+      "Connection: close\r\n\r\n",
+      (unsigned)fb->len);
+
+  size_t remaining = fb->len;
+  const uint8_t* p = fb->buf;
+  while (remaining) {
+    size_t n = client.write(p, remaining);
+    if (n == 0) return false; // client gone
+    remaining -= n;
+    p += n;
+  }
+  return true;
+}
+
+static void handleSnapshot() {
+  Serial.println("[http] /snapshot");
+  digitalWrite(LED_GPIO, HIGH);
+
+  // Capture a frame. If it fails at high res, step down once and retry.
+  camera_fb_t* fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("[http] capture failed, stepping down resolution then retry");
+    framesize_t prev = g_framesize;
+    if (g_framesize == FRAMESIZE_QXGA)      g_framesize = FRAMESIZE_UXGA;
+    else if (g_framesize == FRAMESIZE_UXGA) g_framesize = FRAMESIZE_SXGA;
+    else if (g_framesize == FRAMESIZE_SXGA) g_framesize = FRAMESIZE_XGA;
+    applySensorSettings();
+    fb = esp_camera_fb_get();
+    if (!fb) {
+      digitalWrite(LED_GPIO, LOW);
+      server.send(500, "text/plain", "Camera capture failed");
+      g_framesize = prev; // restore original
+      applySensorSettings();
+      return;
+    }
+    Serial.printf("[http] fallback framesize now %s\n", framesizeToStr(g_framesize));
+  }
+
+  digitalWrite(LED_GPIO, LOW);
+
+  bool ok = sendJpeg(fb);
+  esp_camera_fb_return(fb);
+  if (!ok) {
+    Serial.println("[http] client write failed");
+  }
+  Serial.println("[http] snapshot sent");
+}
+
+static void handleStatus() {
+  char buf[512];
+  uint32_t heap = ESP.getFreeHeap();
+  uint32_t ps   = ESP.getFreePsram();
+  long rssi = WiFi.RSSI();
+  unsigned long up_ms = millis() - g_boot_ms;
+
+  snprintf(buf, sizeof(buf),
+           "{"
+           "\"ip\":\"%s\","
+           "\"rssi_dbm\":%ld,"
+           "\"uptime_ms\":%lu,"
+           "\"free_heap\":%u,"
+           "\"free_psram\":%u,"
+           "\"framesize\":\"%s\","
+           "\"quality\":%d,"
+           "\"vflip\":%d,"
+           "\"hmirror\":%d"
+           "}",
+           WiFi.localIP().toString().c_str(),
+           rssi, up_ms, (unsigned)heap, (unsigned)ps,
+           framesizeToStr(g_framesize), g_quality, g_vflip, g_hmirror);
+
+  server.send(200, "application/json", buf);
+}
+
+static void handleSet() {
+  bool changed = false;
+
+  if (server.hasArg("framesize")) {
+    framesize_t f;
+    if (strToFramesize(server.arg("framesize"), f)) {
+      g_framesize = f;
+      changed = true;
+    }
+  }
+  if (server.hasArg("quality")) {
+    // Valid range 5..63 in driver. Lower = better quality.
+    int q = server.arg("quality").toInt();
+    q = constrain(q, 5, 63);
+    g_quality = q;
+    changed = true;
+  }
+  if (server.hasArg("vflip")) {
+    g_vflip = server.arg("vflip").toInt() ? 1 : 0;
+    changed = true;
+  }
+  if (server.hasArg("hmirror")) {
+    g_hmirror = server.arg("hmirror").toInt() ? 1 : 0;
+    changed = true;
+  }
+
+  if (changed) {
+    applySensorSettings();
+  }
+
+  String msg = "OK ";
+  msg += framesizeToStr(g_framesize);
+  msg += " q=" + String(g_quality);
+  msg += " vflip=" + String(g_vflip);
+  msg += " hmirror=" + String(g_hmirror);
+  server.send(200, "text/plain", msg);
+}
+
+static void handleLed() {
+  int on = server.hasArg("on") ? server.arg("on").toInt() : 0;
+  digitalWrite(LED_GPIO, on ? HIGH : LOW);
+  server.send(200, "text/plain", on ? "LED=ON" : "LED=OFF");
+}
+
+static void handleReboot() {
+  server.send(200, "text/plain", "Rebooting...");
+  Serial.println("[admin] reboot requested");
+  delay(150);
+  ESP.restart();
+}
+
+static void handleRestartCamera() {
+  server.send(200, "text/plain", "Restarting camera...");
+  Serial.println("[admin] camera restart requested");
+  delay(50);
+  esp_camera_deinit();
+  delay(50);
+  if (!initCamera()) {
+    Serial.println("[admin] camera restart failed");
+  }
+}
+
+// ========= Arduino entry points =========
+void setup() {
+  Serial.begin(115200);
+  delay(200);
+  pinMode(LED_GPIO, OUTPUT);
+  digitalWrite(LED_GPIO, LOW);
+  g_boot_ms = millis();
+
+  chooseDefaultsForQuality();
+
+  if (!initCamera()) {
+    Serial.println("[fatal] camera init failed. Halt.");
+    while (true) { delay(1000); }
+  }
+
+  startWiFi();
+
+  // Routes
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/snapshot", HTTP_GET, handleSnapshot);
+  server.on("/admin/status", HTTP_GET, handleStatus);
+  server.on("/admin/set", HTTP_GET, handleSet);
+  server.on("/admin/led", HTTP_GET, handleLed);
+  server.on("/admin/reboot", HTTP_GET, handleReboot);
+  server.on("/admin/restart_camera", HTTP_GET, handleRestartCamera);
+  server.onNotFound([] { server.send(404, "text/plain", "Not found"); });
+
+  server.begin();
+  Serial.println("[http] server started on :80");
+}
+
+void loop() {
+  server.handleClient();
+}</code></pre>
+
+  <div class="hr"></div>
+  <p class="small muted">This document is black-and-white for clean printing and photocopying.</p>
+</div>
+</body>
+</html>

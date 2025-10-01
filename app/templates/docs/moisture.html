@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Documentation - Soil Moisture{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-4">Soil Moisture Sensor</h1>
+<p class="text-slate-300 mb-4">Generic resistive / capacitive probe (sensor_type: <code class="bg-slate-800 px-1 rounded">moisture</code> with plant_id differentiation).</p>
+<ul class="list-disc pl-6 text-slate-400 space-y-1">
+  <li>Raw scale is device-defined (higher = wetter or drier depending on calibration)</li>
+  <li>Calibrate: Record value in dry medium then saturated - map to 0-100%</li>
+  <li>Avoid corrosion: prefer capacitive probes</li>
+</ul>
+<p class="mt-6"><a class="text-emerald-400 hover:underline" href="{{ url_for('main.docs') }}">Back to index</a></p>
+{% endblock %}

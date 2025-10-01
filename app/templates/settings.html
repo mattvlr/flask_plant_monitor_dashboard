@@ -1,0 +1,311 @@
+{% extends 'base.html' %}
+{% block title %}Settings - Greenhouse{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-8">Settings</h1>
+
+<section class="mb-10">
+  <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Database Statistics</h2>
+  {% if db_stats %}
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+    <div class="bg-slate-800/50 rounded p-3">
+      <div class="text-xs uppercase text-slate-400">Total Rows</div>
+      <div class="font-mono text-lg">{{ db_stats.total_rows }}</div>
+    </div>
+    <div class="bg-slate-800/50 rounded p-3">
+      <div class="text-xs uppercase text-slate-400">Rows / Day (avg)</div>
+      <div class="font-mono text-lg">{{ '%.1f' % db_stats.rows_per_day }}</div>
+    </div>
+    <div class="bg-slate-800/50 rounded p-3">
+      <div class="text-xs uppercase text-slate-400">Date Span (days)</div>
+      <div class="font-mono text-lg">{{ '%.2f' % db_stats.span_days }}</div>
+    </div>
+    <div class="bg-slate-800/50 rounded p-3">
+      <div class="text-xs uppercase text-slate-400">DB File Size</div>
+      <div class="font-mono text-lg">{{ (db_stats.db_file_size_bytes / 1024)|round(1) }} KB</div>
+    </div>
+    <div class="bg-slate-800/50 rounded p-3">
+      <div class="text-xs uppercase text-slate-400">Last 24h</div>
+      <div class="font-mono text-lg">{{ db_stats.rows_24h }}</div>
+    </div>
+    <div class="bg-slate-800/50 rounded p-3">
+      <div class="text-xs uppercase text-slate-400">Last 7d</div>
+      <div class="font-mono text-lg">{{ db_stats.rows_7d }}</div>
+    </div>
+    <div class="bg-slate-800/50 rounded p-3">
+      <div class="text-xs uppercase text-slate-400">Last 30d</div>
+      <div class="font-mono text-lg">{{ db_stats.rows_30d }}</div>
+    </div>
+    <div class="bg-slate-800/50 rounded p-3">
+      <div class="text-xs uppercase text-slate-400">Distinct Sensors</div>
+      <div class="font-mono text-lg">{{ db_stats.distinct_sensors }}</div>
+    </div>
+    <div class="bg-slate-800/50 rounded p-3">
+      <div class="text-xs uppercase text-slate-400">Distinct Plants</div>
+      <div class="font-mono text-lg">{{ db_stats.distinct_plants }}</div>
+    </div>
+    <div class="bg-slate-800/50 rounded p-3">
+      <div class="text-xs uppercase text-slate-400">Rows w/ Plant ID</div>
+      <div class="font-mono text-lg">{{ db_stats.rows_with_plant }}</div>
+    </div>
+    <div class="bg-slate-800/50 rounded p-3">
+      <div class="text-xs uppercase text-slate-400">Rows w/o Plant ID</div>
+      <div class="font-mono text-lg">{{ db_stats.rows_null_plant }}</div>
+    </div>
+  </div>
+  <p class="mt-3 text-xs text-slate-500">Oldest: {{ db_stats.oldest }} | Newest: {{ db_stats.newest }}</p>
+  {% else %}
+    <p class="text-slate-500 text-sm">No stats available.</p>
+  {% endif %}
+</section>
+
+<section class="mb-10" >
+  <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Per-Sensor Aggregates</h2>
+  <div class="overflow-x-auto">
+    <table class="min-w-full text-sm">
+      <thead>
+        <tr class="text-slate-400 text-xs uppercase tracking-wider">
+          <th class="text-left py-2 pr-4">Sensor</th>
+          <th class="text-left py-2 pr-4">Count</th>
+          <th class="text-left py-2 pr-4">Min</th>
+          <th class="text-left py-2 pr-4">Max</th>
+          <th class="text-left py-2 pr-4">Avg</th>
+          <th class="text-left py-2 pr-4">First</th>
+          <th class="text-left py-2 pr-4">Last</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if sensor_stats %}
+          {% for s in sensor_stats %}
+          <tr class="border-t border-slate-800">
+            <td class="py-2 pr-4 font-mono">{{ s.sensor_type }}</td>
+            <td class="py-2 pr-4">{{ s.count }}</td>
+            <td class="py-2 pr-4">{{ '%.2f' % s.min if s.min is not none else '—' }}</td>
+            <td class="py-2 pr-4">{{ '%.2f' % s.max if s.max is not none else '—' }}</td>
+            <td class="py-2 pr-4">{{ '%.2f' % s.avg if s.avg is not none else '—' }}</td>
+            <td class="py-2 pr-4 font-mono">{{ s.first_ts }}</td>
+            <td class="py-2 pr-4 font-mono">{{ s.last_ts }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="7" class="py-4 text-slate-500 text-center">No sensor data.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-2 text-xs text-slate-500">Timestamps are UTC. Stats computed live.</p>
+</section>
+
+<!-- Outlier Inspector -->
+<section class="mb-10">
+  <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Outlier Inspector</h2>
+  <p class="text-xs text-slate-500 mb-3">Shows single-point anomalies per sensor using robust MAD-based scoring with Z-score fallback. Adjust sensitivity and window, then delete selected rows.</p>
+  <form method="get" action="/settings" class="flex flex-wrap gap-4 items-end mb-4">
+    <div>
+      <label class="block text-xs mb-1 text-slate-400">Window (days)</label>
+      <input type="number" min="1" name="outlier_days" value="{{ outlier_days|default(30) }}" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 w-28">
+    </div>
+    <div>
+      <label class="block text-xs mb-1 text-slate-400">MAD threshold</label>
+      <input type="number" step="0.1" min="1" name="outlier_mad_thresh" value="{{ outlier_mad_thresh|default(6) }}" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 w-28">
+    </div>
+    <div>
+      <label class="block text-xs mb-1 text-slate-400">Z threshold</label>
+      <input type="number" step="0.1" min="1" name="outlier_z_thresh" value="{{ outlier_z_thresh|default(4) }}" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 w-28">
+    </div>
+    <button class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm font-medium">Apply</button>
+  </form>
+
+  {% if outliers and outliers|length > 0 %}
+    <div class="mb-3 text-xs text-slate-400">
+      Total Suspected: <span class="font-semibold text-slate-200">{{ outliers|length }}</span>
+      <span class="mx-2">|</span>
+      By Sensor:
+      {% for grp in outliers|groupby('sensor_type') %}
+        <span class="ml-2 font-mono">{{ grp.grouper }} ({{ grp.list|length }})</span>
+      {% endfor %}
+    </div>
+
+    <form method="post" action="/settings" onsubmit="return confirm('Delete all selected readings? This cannot be undone.');">
+      <input type="hidden" name="action" value="delete_outliers_selected" />
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="text-slate-400 text-xs uppercase tracking-wider">
+              <th class="py-2 pr-4">Select</th>
+              <th class="text-left py-2 pr-4">ID</th>
+              <th class="text-left py-2 pr-4">Timestamp (UTC)</th>
+              <th class="text-left py-2 pr-4">Sensor</th>
+              <th class="text-left py-2 pr-4">Plant</th>
+              <th class="text-left py-2 pr-4">Reading</th>
+              <th class="text-left py-2 pr-4">Score</th>
+              <th class="text-left py-2 pr-4">Method</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for o in outliers %}
+            <tr class="border-t border-slate-800">
+              <td class="py-2 pr-4 align-middle"><input type="checkbox" name="reading_ids" value="{{ o.id }}" /></td>
+              <td class="py-2 pr-4 font-mono">{{ o.id }}</td>
+              <td class="py-2 pr-4 font-mono">
+                {% if o.time_inserted.strftime is defined %}
+                  {{ o.time_inserted.strftime('%Y-%m-%d %H:%M:%S') }}
+                {% else %}
+                  {{ o.time_inserted }}
+                {% endif %}
+              </td>
+              <td class="py-2 pr-4 font-mono">{{ o.sensor_type }}</td>
+              <td class="py-2 pr-4">{{ o.plant_id if o.plant_id is not none else '—' }}</td>
+              <td class="py-2 pr-4">{{ '%.3f' % o.reading }}</td>
+              <td class="py-2 pr-4">{{ '%.2f' % o.score }}</td>
+              <td class="py-2 pr-4">{{ o.method }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="mt-3">
+        <button class="px-4 py-2 bg-red-600 hover:bg-red-500 rounded text-sm font-medium">Delete Selected</button>
+      </div>
+    </form>
+  {% else %}
+    <p class="text-slate-500 text-sm">No outliers found with current settings.</p>
+  {% endif %}
+
+  <p class="mt-3 text-xs text-slate-500">Tip: Start with a high MAD threshold (6–7). Lower only if needed. This tool looks at single points, not trends.</p>
+</section>
+
+<!-- System configuration (moved up for logical flow before DB management) -->
+<div class="card mb-10">
+    <h3 class="text-lg font-medium mb-4">System</h3>
+    <form method="POST" class="space-y-4 mb-4">
+        <input type="hidden" name="action" value="update_light_on_hour">
+        <div>
+            <label for="light_on_time" class="block text-sm font-medium text-slate-300">Light On Time (HH:MM, Central)</label>
+            <input type="time" name="light_on_time" id="light_on_time" value="{{ '%02d:%02d' % (light_on_hour|default(20), light_on_minute|default(0)) }}" class="mt-1 w-40 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200">
+            <button type="submit" class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium ml-2">Save</button>
+        </div>
+    </form>
+    <!-- Added: Light Off Time setting -->
+    <form method="POST" class="space-y-4 mb-6">
+        <input type="hidden" name="action" value="update_light_off_hour">
+        <div>
+            <label for="light_off_time" class="block text-sm font-medium text-slate-300">Light Off Time (HH:MM, Central)</label>
+            <input type="time" name="light_off_time" id="light_off_time" value="{{ '%02d:%02d' % (light_off_hour|default(11), light_off_minute|default(0)) }}" class="mt-1 w-40 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200">
+            <button type="submit" class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium ml-2">Save</button>
+        </div>
+    </form>
+    <form method="POST" class="space-y-4">
+        <input type="hidden" name="action" value="update_interval">
+        <div>
+            <label for="interval" class="block text-sm font-medium text-slate-300">Capture Interval (seconds) for Timelapse</label>
+            <input type="number" name="interval" id="interval" min="60" value="{{ capture_interval }}" class="mt-1 w-32 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200">
+            <button type="submit" class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium ml-2">Update</button>
+        </div>
+    </form>
+</div>
+
+<section class="mb-10">
+  <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Database Management</h2>
+  <div class="flex gap-4 items-start flex-wrap">
+    <form method="post" action="/settings" onsubmit="return confirm('This will create the database schema. If tables exist, they will be dropped first. Continue?')" class="flex gap-3 items-end">
+      <input type="hidden" name="action" value="db_create" />
+      <button class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium">Create/Reset Tables</button>
+    </form>
+    <form method="post" class="flex gap-3 items-end" action="/settings">
+      <input type="hidden" name="action" value="db_prune" />
+      <div>
+        <label class="block text-xs mb-1 text-slate-400">Prune data older than (days)</label>
+        <input type="number" min="1" name="days" value="30" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 w-32" />
+      </div>
+      <button class="px-4 py-2 bg-red-600 hover:bg-red-500 rounded text-sm font-medium">Prune Data</button>
+    </form>
+  </div>
+  <div class="mt-6">
+    <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Latest 5 Readings</h3>
+    <table class="min-w-full text-sm">
+      <thead>
+        <tr class="text-slate-400 text-xs uppercase tracking-wider">
+          <th class="text-left py-2 pr-4">Timestamp (UTC)</th>
+          <th class="text-left py-2 pr-4">Sensor</th>
+          <th class="text-left py-2 pr-4">Plant ID</th>
+          <th class="text-left py-2 pr-4">Reading</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if latest_readings %}
+          {% for r in latest_readings %}
+          <tr class="border-t border-slate-800">
+            <td class="py-2 pr-4 font-mono">{{ r.time_inserted.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+            <td class="py-2 pr-4">{{ r.sensor_type }}</td>
+            <td class="py-2 pr-4">{{ r.plant_id if r.plant_id is not none else 'N/A' }}</td>
+            <td class="py-2 pr-4">{{ r.reading }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="4" class="py-4 text-slate-500 text-center">No readings in database.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="mb-10">
+  <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Manual Timelapse Build</h2>
+  <form method="post" action="/timelapse" onsubmit="return confirm('Build new timelapse from all frames? This can take a while.')">
+    <button class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm font-medium" formaction="/timelapse" formmethod="post">Build Timelapse Now</button>
+  </form>
+</section>
+
+<section class="mb-10">
+  <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Existing Timelapses</h2>
+  <div class="overflow-x-auto">
+    <table class="min-w-full text-sm">
+      <thead>
+        <tr class="text-slate-400 text-xs uppercase tracking-wider">
+          <th class="text-left py-2 pr-4">Filename</th>
+          <th class="text-left py-2 pr-4">Size</th>
+          <th class="text-left py-2 pr-4">Modified (UTC)</th>
+          <th class="py-2 pr-4">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if timelapses %}
+          {% for f in timelapses %}
+          <tr class="border-t border-slate-800">
+            <td class="py-2 pr-4 font-mono">{{ f }}</td>
+            <td class="py-2 pr-4"></td>
+            <td class="py-2 pr-4"></td>
+            <td class="py-2 pr-4">
+              <form method="post" action="/settings" onsubmit="return confirm('Delete timelapse {{ f }}?')" class="inline">
+                <input type="hidden" name="action" value="delete" />
+                <input type="hidden" name="filename" value="{{ f }}" />
+                <button class="px-3 py-1 rounded bg-red-600 hover:bg-red-500">Delete</button>
+              </form>
+              <a href="/timelapse/{{ f }}" target="_blank" class="ml-2 text-emerald-400 hover:underline">Download</a>
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="4" class="py-4 text-slate-500 text-center">No timelapses yet.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-2 text-xs text-slate-500">MP4 + WebM pairs are shown; deleting one removes both formats.</p>
+</section>
+
+<section class="mb-10">
+  <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Prune Old Captures</h2>
+  <form method="post" class="flex gap-3 items-end" action="/settings">
+    <input type="hidden" name="action" value="prune_captures" />
+    <div>
+      <label class="block text-xs mb-1 text-slate-400">Keep Last (days)</label>
+      <input type="number" min="1" name="days" value="14" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 w-32" />
+    </div>
+    <button class="px-4 py-2 bg-red-600 hover:bg-red-500 rounded text-sm font-medium">Prune</button>
+  </form>
+  <p class="mt-2 text-xs text-slate-500">Deletes entire dated folders older than threshold.</p>
+</section>
+
+
+{% endblock %}

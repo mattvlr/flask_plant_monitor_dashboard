@@ -1,0 +1,925 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard - Greenhouse{% endblock %}
+
+{% block header_actions %}
+<div class="flex gap-3 items-center">
+  <div class="flex items-center gap-2 text-xs text-slate-400">
+    <label class="flex items-center gap-1 cursor-pointer">
+      <input id="autoRefreshToggle" type="checkbox" class="accent-emerald-500">
+      <span>Auto Refresh</span>
+    </label>
+    <input id="refreshInterval" type="number" min="5" value="30" class="w-16 bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-slate-200 text-right" />
+    <span>s</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<h2 class="text-sm font-semibold text-slate-400 tracking-wider mb-2">Tent</h2>
+<div class="grid gap-6 grid-cols-1 md:grid-cols-3 xl:grid-cols-4 mb-10">
+  <div class="card">
+    <div class="label">Temperature</div>
+    <div id="tempValue" class="value">--</div>
+    <canvas id="tempChart" height="120" class="mt-4"></canvas>
+  </div>
+  <div class="card">
+    <div class="label">Humidity</div>
+    <div id="humidityValue" class="value">--</div>
+    <canvas id="humidityChart" height="120" class="mt-4"></canvas>
+  </div>
+  <div class="card">
+    <div class="label">Light</div>
+    <div id="lightValue" class="value">--</div>
+    <canvas id="lightChart" height="120" class="mt-4"></canvas>
+  </div>
+  <!-- New: Pressure & Altitude panels -->
+  <div class="card">
+    <div class="label">Pressure</div>
+    <div id="pressureValue" class="value">--</div>
+    <canvas id="pressureChart" height="120" class="mt-4"></canvas>
+  </div>
+  <div class="card">
+    <div class="label">Altitude</div>
+    <div id="altitudeValue" class="value">--</div>
+    <canvas id="altitudeChart" height="120" class="mt-4"></canvas>
+  </div>
+  
+  <div class="card">
+    <div class="label" id="lightCyclePrimaryLabel">Light Cycle</div>
+    <div id="lightCountdown" class="value">--</div>
+    <div id="lightCountdownStatus" class="text-xs text-slate-400 mt-4">Determining schedule…</div>
+  </div>
+  <div class="card">
+    <div class="label mb-2">Latest Image</div>
+    {% if latest_image %}
+    <img id="latestImageThumb" src="/capture/{{ latest_image }}" class="w-full h-auto rounded-lg object-cover max-h-72" />
+    {% else %}
+    <div class="text-slate-400 text-sm">No image yet.</div>
+    {% endif %}
+    <hr class="my-4 border-slate-700" />
+    <div class="label mb-2">Timelapse Controls</div>
+    <div class="flex flex-col sm:flex-row md:flex-col gap-3">
+      <button id="captureBtn" class="flex-1 px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium">Capture Now</button>
+      <button id="timelapseBtn" class="flex-1 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium">Build Timelapse</button>
+    </div>
+    <div class="text-xs text-slate-400 mt-3 leading-snug">
+      Capture grabs a single frame. Build Timelapse compiles recent frames into a video.
+    </div>
+  </div>
+  <div class="card col-span-1 md:col-span-2 xl:col-span-2">
+    <div class="flex items-center justify-between mb-1">
+      <div class="label">Sun Position</div>
+      <div class="flex gap-3 text-[10px] text-slate-400">
+        <span id="sunMetaElevation">--°</span>
+        <span id="sunMetaAzimuth">--°</span>
+      </div>
+    </div>
+    <div id="sunTracker" class="relative mt-1">
+      <svg class="w-full h-48" viewBox="0 0 260 180" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="dayArcGrad" x1="0" y1="1" x2="0" y2="0">
+            <stop offset="0%" stop-color="#0f172a" />
+            <stop offset="50%" stop-color="#0c4a6e" />
+            <stop offset="100%" stop-color="#1e3a8a" />
+          </linearGradient>
+          <linearGradient id="sunFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#ffe9a8" />
+            <stop offset="100%" stop-color="#fbbf24" />
+          </linearGradient>
+          <filter id="sunGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="4" result="glow" />
+            <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <!-- Night background full circle faint -->
+        <circle cx="130" cy="130" r="120" fill="none" stroke="#1e293b" stroke-width="1" stroke-dasharray="2 6" />
+        <!-- Horizon -->
+        <line x1="10" y1="130" x2="250" y2="130" stroke="#475569" stroke-width="1" stroke-dasharray="4 4" />
+        <!-- Daytime semi-arc (sunrise to sunset) dynamic path -->
+        <path id="dayArc" d="" stroke="url(#dayArcGrad)" stroke-width="3" fill="none" stroke-linecap="round" />
+        <!-- Sun path full circle faint -->
+        <circle cx="130" cy="130" r="120" fill="none" stroke="#334155" stroke-width="1" />
+        <!-- Sun orb -->
+        <g id="sunGroup">
+          <circle id="sunOrb" cx="130" cy="10" r="10" fill="url(#sunFill)" stroke="#fde68a" stroke-width="1.5" filter="url(#sunGlow)" />
+        </g>
+        <!-- Labels -->
+        <text id="sunriseSvgLabel" x="30" y="145" font-size="10" fill="#94a3b8" text-anchor="start">--:--</text>
+        <text id="sunsetSvgLabel" x="230" y="145" font-size="10" fill="#94a3b8" text-anchor="end">--:--</text>
+        <text id="solarNoonSvgLabel" x="130" y="18" font-size="10" fill="#fcd34d" text-anchor="middle">Noon</text>
+      </svg>
+      <!-- Progress bars -->
+      <div class="mt-3 space-y-2">
+        <div class="w-full"> <div class="flex justify-between text-[10px] mb-1 text-slate-500"><span>Day Progress</span><span id="dayProgressPct">--%</span></div>
+          <div class="h-1.5 bg-slate-700 rounded"><div id="dayProgressBar" class="h-full bg-gradient-to-r from-emerald-400 to-cyan-400 rounded" style="width:0%"></div></div>
+        </div>
+        <div class="w-full"> <div class="flex justify-between text-[10px] mb-1 text-slate-500"><span>Sun Above Horizon</span><span id="daylightProgressPct">--%</span></div>
+          <div class="h-1.5 bg-slate-700 rounded"><div id="daylightProgressBar" class="h-full bg-gradient-to-r from-amber-300 to-orange-500 rounded" style="width:0%"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Move Last Seen into same row
+  <div class="card md:col-span-1 xl:col-span-2">
+    <div class="label">Sensor Uptime / Last Seen</div>
+    <div id="lastSeenList" class="mt-3 space-y-2 text-xs text-slate-300 max-h-64 overflow-auto">
+      <div class="text-slate-500">Loading…</div>
+    </div>
+  </div> -->
+</div>
+
+<!-- New quick-win panels -->
+<h2 class="text-sm font-semibold text-slate-400 tracking-wider mb-2">Overview</h2>
+<div class="grid gap-6 grid-cols-1 md:grid-cols-3 xl:grid-cols-4 mb-10">
+  <!-- Daily Min/Max/Avg -->
+  <div class="card">
+    <div class="label">Daily Min/Max/Avg (24h)</div>
+    <div class="mt-3 grid grid-cols-3 md:grid-cols-5 gap-3 text-center">
+      <div>
+        <div class="text-xs text-slate-400">Temp</div>
+        <div class="text-lg" id="statTempAvg">--</div>
+        <div class="text-[10px] text-slate-500"><span id="statTempMin">--</span> / <span id="statTempMax">--</span></div>
+      </div>
+      <div>
+        <div class="text-xs text-slate-400">Humidity</div>
+        <div class="text-lg" id="statHumAvg">--</div>
+        <div class="text-[10px] text-slate-500"><span id="statHumMin">--</span> / <span id="statHumMax">--</span></div>
+      </div>
+      <div>
+        <div class="text-xs text-slate-400">Light</div>
+        <div class="text-lg" id="statLightAvg">--</div>
+        <div class="text-[10px] text-slate-500"><span id="statLightMin">--</span> / <span id="statLightMax">--</span></div>
+      </div>
+      <!-- New: Pressure -->
+      <div>
+        <div class="text-xs text-slate-400">Pressure</div>
+        <div class="text-lg" id="statPressureAvg">--</div>
+        <div class="text-[10px] text-slate-500"><span id="statPressureMin">--</span> / <span id="statPressureMax">--</span></div>
+      </div>
+      <!-- New: Altitude -->
+      <div>
+        <div class="text-xs text-slate-400">Altitude</div>
+        <div class="text-lg" id="statAltAvg">--</div>
+        <div class="text-[10px] text-slate-500"><span id="statAltMin">--</span> / <span id="statAltMax">--</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VPD + Dew Point -->
+  <div class="card">
+    <div class="label">VPD & Dew Point</div>
+    <div class="mt-3 grid grid-cols-2 gap-4">
+      <div>
+        <div class="text-xs text-slate-400">VPD</div>
+        <div class="text-2xl font-semibold" id="vpdValue">--</div>
+        <div class="text-[10px] text-slate-500" id="vpdHint">kPa</div>
+      </div>
+      <div>
+        <div class="text-xs text-slate-400">Dew Point</div>
+        <div class="text-2xl font-semibold" id="dewValue">--</div>
+        <div class="text-[10px] text-slate-500">°F</div>
+      </div>
+    </div>
+    <!-- Link to documentation: app/templates/docs/vpd.html-->
+    <div class="mt-3">
+      <a href="{{ url_for('main.docs', page='vpd') }}" target="_blank" rel="noopener noreferrer" aria-label="Open VPD documentation in a new tab" class="group inline-flex items-center text-xs text-emerald-300 hover:text-emerald-200 transition-colors">
+        <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/70 border border-slate-700/60 group-hover:bg-slate-700/70">
+          <span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500/15 text-emerald-300 text-[10px] font-semibold">i</span>
+          <span>VPD Documentation</span>
+          <span class="opacity-70 group-hover:opacity-100">↗</span>
+        </span>
+      </a>
+    </div>
+  </div>
+
+  <!-- Sensor Uptime / Last Seen -->
+  <div class="card md:col-span-2 xl:col-span-1">
+    <div class="label">Sensor Uptime / Last Seen</div>
+    <div id="lastSeenList" class="mt-3 space-y-2 text-xs text-slate-300 max-h-40 overflow-auto">
+      <div class="text-slate-500">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Storage Usage -->
+  <div class="card">
+    <div class="label">Storage Usage</div>
+    <div class="mt-3 space-y-2 text-xs text-slate-300">
+      <div class="flex justify-between"><span>Captures</span><span id="capSize">--</span></div>
+      <div class="flex justify-between"><span>Timelapses</span><span id="tlSize">--</span></div>
+      <div class="flex justify-between"><span>Database</span><span id="dbSize">--</span></div>
+      <hr class="border-slate-700" />
+      <div class="flex justify-between"><span>Disk Used</span><span id="diskUsed">--</span></div>
+      <div class="flex justify-between"><span>Disk Free</span><span id="diskFree">--</span></div>
+      <div class="h-2 bg-slate-800 rounded">
+        <div id="diskBar" class="h-full bg-gradient-to-r from-rose-400 to-amber-400 rounded" style="width:0%"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- History -->
+<div class="mt-4">
+  <div class="flex items-center gap-2 mb-4 flex-wrap">
+    <button data-range="1h" class="history-tab px-3 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-medium">Last 1h</button>
+    <button data-range="6h" class="history-tab px-3 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-medium">Last 6h</button>
+    <button data-range="12h" class="history-tab px-3 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-medium">Last 12h</button>
+    <button data-range="24h" class="history-tab px-3 py-1 rounded-lg bg-slate-800 text-xs font-medium tab-active">Last 24h</button>
+    <button data-range="48h" class="history-tab px-3 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-medium">Last 48h</button>
+    <button data-range="7d" class="history-tab px-3 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-medium">Last 7d</button>
+    <button data-range="30d" class="history-tab px-3 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-medium">30d</button>
+    <button data-range="90d" class="history-tab px-3 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-medium">90d</button>
+    <button data-range="monthly" class="history-tab px-3 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-medium">Daily Avg (30d)</button>
+  </div>
+  <div class="grid gap-6 grid-cols-1 md:grid-cols-2 xl:grid-cols-3" id="historyGrid">
+    <div class="card relative group">
+      <button class="fullscreen-btn hidden group-hover:block absolute top-2 right-2 text-slate-400 hover:text-white" data-target="histTemp" title="Fullscreen">⛶</button>
+      <div class="label mb-1">Temp History (<span class="hist-range-label">24h</span>)</div>
+      <div class="h-64">
+        <canvas id="histTemp"></canvas>
+      </div>
+    </div>
+    <div class="card relative group">
+      <button class="fullscreen-btn hidden group-hover:block absolute top-2 right-2 text-slate-400 hover:text-white" data-target="histHumidity" title="Fullscreen">⛶</button>
+      <div class="label mb-1">Humidity History (<span class="hist-range-label">24h</span>)</div>
+      <div class="h-64">
+        <canvas id="histHumidity"></canvas>
+      </div>
+    </div>
+    <div class="card relative group">
+      <button class="fullscreen-btn hidden group-hover:block absolute top-2 right-2 text-slate-400 hover:text-white" data-target="histLight" title="Fullscreen">⛶</button>
+      <div class="label mb-1">Light History (<span class="hist-range-label">24h</span>)</div>
+      <div class="h-64">
+        <canvas id="histLight"></canvas>
+      </div>
+    </div>
+    <!-- New: Pressure History -->
+    <div class="card relative group">
+      <button class="fullscreen-btn hidden group-hover:block absolute top-2 right-2 text-slate-400 hover:text-white" data-target="histPressure" title="Fullscreen">⛶</button>
+      <div class="label mb-1">Pressure History (<span class="hist-range-label">24h</span>)</div>
+      <div class="h-64">
+        <canvas id="histPressure"></canvas>
+      </div>
+    </div>
+    <!-- New: Altitude History -->
+    <div class="card relative group">
+      <button class="fullscreen-btn hidden group-hover:block absolute top-2 right-2 text-slate-400 hover:text-white" data-target="histAltitude" title="Fullscreen">⛶</button>
+      <div class="label mb-1">Altitude History (<span class="hist-range-label">24h</span>)</div>
+      <div class="h-64">
+        <canvas id="histAltitude"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="my-6 border-slate-700" />
+<!-- Light Schedule Timeline -->
+<div class="card mb-10">
+  <div class="label">Light Schedule Timeline (24h)</div>
+  <div class="mt-3">
+    <div class="relative h-3 bg-slate-800 rounded">
+      <div id="lightOnBarA" class="absolute h-full bg-amber-400/80 rounded" style="left:0%; width:0%"></div>
+      <div id="lightOnBarB" class="absolute h-full bg-amber-400/60 rounded" style="left:0%; width:0%"></div>
+      <!-- Current time indicator -->
+      <div id="lightNowMarker" class="absolute h-full bg-cyan-300/90 rounded pointer-events-none" style="width:2px; left:0%"></div>
+      <div id="lightNowLabel" class="absolute -top-4 text-[10px] text-cyan-300 pointer-events-none" style="left:0%; transform:translateX(-50%);">Now</div>
+    </div>
+    <div class="flex justify-between text-[10px] text-slate-500 mt-1">
+      <span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span>
+    </div>
+    <div class="text-xs text-slate-400 mt-2" id="lightTimelineMeta">--</div>
+  </div>
+</div>
+
+
+
+<h2 class="text-sm font-semibold text-slate-400 tracking-wider mb-2">Latest Timelapse</h2>
+<div class="card mb-12">
+  {% if latest_timelapse %}
+  <video id="timelapseVideo" controls class="rounded-lg w-full max-h-[600px] bg-black">
+    <source src="/timelapse/{{ latest_timelapse.filename }}" type="video/mp4" />
+    <source src="/timelapse/{{ latest_timelapse.filename | replace('.mp4', '.webm') }}" type="video/webm" />
+    Your browser does not support the video tag.
+  </video>
+  {% else %}
+  <div class="text-slate-400 text-sm">No timelapse available yet.</div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const charts = {};
+function makeChart(ctx, label, color){
+  return new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ label, data: [], borderColor: color, tension: .35, fill:false }]},
+    options: { plugins:{legend:{display:false}}, scales:{x:{display:false}, y:{display:false}}, elements:{point:{radius:0}}, animation:false }
+  });
+}
+
+function pushData(chart, value){
+  const MAX = 60; // last 60 samples (~1 minute if 1s polling)
+  chart.data.labels.push('');
+  chart.data.datasets[0].data.push(value);
+  if(chart.data.labels.length > MAX){
+    chart.data.labels.shift();
+    chart.data.datasets[0].data.shift();
+  }
+  chart.update();
+}
+
+async function poll(){
+  const r = await fetch('/api/latest');
+  if(!r.ok) return;
+  const data = await r.json();
+  if(data.temp !== undefined){
+    document.getElementById('tempValue').textContent = data.temp.toFixed(1) + '°F';
+    pushData(charts.temp, data.temp);
+  }
+  if(data.humidity !== undefined){
+    document.getElementById('humidityValue').textContent = data.humidity.toFixed(1) + '%';
+    pushData(charts.humidity, data.humidity);
+  }
+  const lightValue = data.light ?? data.light_plant1;
+  if(lightValue !== undefined){
+    document.getElementById('lightValue').textContent = lightValue.toFixed(0);
+    pushData(charts.light, lightValue);
+  }
+  // New: pressure & altitude
+  if(data.pressure !== undefined){
+    document.getElementById('pressureValue').textContent = data.pressure.toFixed(1) + ' hPa';
+    pushData(charts.pressure, data.pressure);
+  }
+  if(data.altitude !== undefined){
+    document.getElementById('altitudeValue').textContent = data.altitude.toFixed(0) + ' m';
+    pushData(charts.altitude, data.altitude);
+  }
+  // Update VPD & Dew Point from latest values (if both available)
+  if(data.temp != null && data.humidity != null){
+    updateVpdDewFromLatest(data.temp, data.humidity);
+  }
+}
+
+let historyCharts = {};
+
+function makeHistoryChart(ctx, label, color){
+  return new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ label, data: [], borderColor: color, tension:.25, pointRadius:0, fill:false }]},
+    options:{
+      parsing:false,
+      scales:{
+        x:{ type:'time', time:{ tooltipFormat:'MMM d, yyyy HH:mm', unit:'hour' }, ticks:{ color:'#94a3b8' }, grid:{color:'rgba(255,255,255,0.05)'} },
+        y:{ grid:{color:'rgba(255,255,255,0.05)'}, ticks:{ color:'#94a3b8'} }
+      },
+      plugins:{ legend:{display:false}, tooltip:{ mode:'nearest', intersect:false } },
+      interaction:{ mode:'nearest', intersect:false },
+      animation:false,
+      maintainAspectRatio:false,
+      responsive:true
+    }
+  });
+}
+
+function adjustTimeScale(range, chart){
+  if(!chart) return;
+  const timeScale = chart.options.scales.x.time;
+  if(['1h','6h','12h','24h','48h'].includes(range)) timeScale.unit = 'hour';
+  else if(['7d','30d','90d','monthly'].includes(range)) timeScale.unit = 'day';
+  chart.update('none');
+}
+
+async function loadHistory(range='24h'){
+  const r = await fetch('/api/history?range=' + range);
+  if(!r.ok) return;
+  const j = await r.json();
+  const d = j.data;
+  const maps = {
+    temp: historyCharts.temp,
+    humidity: historyCharts.humidity,
+    light: historyCharts.light,
+    pressure: historyCharts.pressure,
+    altitude: historyCharts.altitude
+  };
+  Object.entries(maps).forEach(([key, chart])=>{
+    if(!chart) return;
+    const series = d[key] || [];
+    chart.data.labels = series.map(p=>p.t);
+    chart.data.datasets[0].data = series.map(p=>({x:p.t, y:p.v}));
+    adjustTimeScale(range, chart);
+    chart.update();
+  });
+  document.querySelectorAll('.hist-range-label').forEach(el=> el.textContent = range);
+}
+
+function setupFullscreen(){
+  function openFullscreen(canvasId){
+    const canvas = document.getElementById(canvasId);
+    if(!canvas) return;
+    const container = canvas.closest('.card');
+    if(!container) return;
+    container.requestFullscreen?.();
+  }
+  document.querySelectorAll('.fullscreen-btn').forEach(btn=>{
+    btn.addEventListener('click', e=>{
+      e.stopPropagation();
+      openFullscreen(btn.dataset.target);
+    });
+  });
+  document.addEventListener('fullscreenchange', ()=>{
+    const el = document.fullscreenElement;
+    if(el){
+      el.classList.add('fullscreen-active');
+      const canv = el.querySelector('canvas');
+      if(canv){
+        setTimeout(()=>{ Object.values(historyCharts).forEach(c=> c && c.resize()); }, 150);
+      }
+    } else {
+      document.querySelectorAll('.fullscreen-active').forEach(c=> c.classList.remove('fullscreen-active'));
+      Object.values(historyCharts).forEach(c=> c && c.resize());
+    }
+  });
+}
+
+function init(){
+  charts.temp = makeChart(document.getElementById('tempChart'), 'Temp', '#f87171');
+  charts.humidity = makeChart(document.getElementById('humidityChart'), 'Humidity', '#60a5fa');
+  charts.light = makeChart(document.getElementById('lightChart'), 'Light', '#fbbf24');
+  charts.pressure = makeChart(document.getElementById('pressureChart'), 'Pressure', '#38bdf8');
+  charts.altitude = makeChart(document.getElementById('altitudeChart'), 'Altitude', '#a78bfa');
+  setInterval(poll, 5000);
+  poll();
+
+  document.getElementById('captureBtn').addEventListener('click', async ()=>{
+    captureBtn.disabled = true; captureBtn.textContent='Capturing...';
+    const resp = await fetch('/capture', {method:'POST'});
+    captureBtn.disabled = false; captureBtn.textContent='Capture Now';
+    setTimeout(()=>{ if (typeof refreshLatestImage === 'function') refreshLatestImage(); }, 500);
+  });
+
+  document.getElementById('timelapseBtn').addEventListener('click', async ()=>{
+    timelapseBtn.disabled = true; timelapseBtn.textContent='Building...';
+    const r = await fetch('/timelapse', {method:'POST'});
+    if(r.ok){
+      const j = await r.json();
+      const video = document.getElementById('timelapseVideo');
+      if(video){
+        video.querySelector('source').src = '/timelapse/' + j.timelapse + '?t=' + Date.now();
+        video.load();
+      } else {
+        location.reload();
+      }
+    }
+    timelapseBtn.disabled = false; timelapseBtn.textContent='Build Timelapse';
+  });
+
+  historyCharts.temp = makeHistoryChart(document.getElementById('histTemp'), 'Temp', '#f87171');
+  historyCharts.humidity = makeHistoryChart(document.getElementById('histHumidity'), 'Humidity', '#60a5fa');
+  historyCharts.light = makeHistoryChart(document.getElementById('histLight'), 'Light', '#fbbf24');
+  historyCharts.pressure = makeHistoryChart(document.getElementById('histPressure'), 'Pressure', '#38bdf8');
+  historyCharts.altitude = makeHistoryChart(document.getElementById('histAltitude'), 'Altitude', '#a78bfa');
+  loadHistory('24h');
+
+  function updateHistoryTabStyles(){
+    document.querySelectorAll('.history-tab').forEach(btn => {
+      if(btn.classList.contains('tab-active')){
+        btn.classList.add('bg-slate-800');
+        btn.classList.remove('bg-slate-700');
+      } else {
+        btn.classList.remove('bg-slate-800');
+        btn.classList.add('bg-slate-700');
+      }
+    });
+  }
+
+  document.querySelectorAll('.history-tab').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.history-tab').forEach(b=> b.classList.remove('tab-active'));
+      btn.classList.add('tab-active');
+      updateHistoryTabStyles();
+      loadHistory(btn.dataset.range);
+    });
+  });
+  updateHistoryTabStyles();
+
+  setupFullscreen();
+  setupAutoRefresh();
+  updateSunPosition();
+  updateLightCountdown();
+  setInterval(updateLightCountdown, 1000);
+}
+
+document.addEventListener('DOMContentLoaded', init);
+
+async function updateSunPosition(){
+    try {
+      const r = await fetch('/api/sun_position');
+      if(!r.ok) return;
+      const data = await r.json();
+      if(data.error) return;
+
+      const sunrise = new Date(data.sunrise);
+      const sunset = new Date(data.sunset);
+      const solarNoon = new Date(data.solar_noon);
+      const now = new Date(data.now);
+
+      const fmt = {hour:'2-digit', minute:'2-digit'};
+      // Remove calls to non-existent sunriseTime/sunsetTime spans (SVG labels only)
+      const sunriseLabel = document.getElementById('sunriseSvgLabel');
+      const sunsetLabel = document.getElementById('sunsetSvgLabel');
+      if(sunriseLabel) sunriseLabel.textContent = sunrise.toLocaleTimeString([], fmt);
+      if(sunsetLabel) sunsetLabel.textContent = sunset.toLocaleTimeString([], fmt);
+
+      // Elevation & Azimuth
+      if(data.elevation_deg != null){
+        const elEl = document.getElementById('sunMetaElevation');
+        if(elEl) elEl.textContent = `${data.elevation_deg.toFixed(1)}°`;
+      }
+      if(data.azimuth_deg != null){
+        const azEl = document.getElementById('sunMetaAzimuth');
+        if(azEl) azEl.textContent = `${data.azimuth_deg.toFixed(0)}°`;
+      }
+
+      // Fractions of day for sunrise & sunset (0..1)
+      const toDayFrac = d => (d.getHours()*3600 + d.getMinutes()*60 + d.getSeconds()) / 86400;
+      const dayStartFrac = toDayFrac(sunrise);
+      const dayEndFrac = toDayFrac(sunset);
+
+      // Angle mapping: 0 @ midnight bottom, 0.25 sunrise right horizon, 0.5 noon top, 0.75 sunset left horizon
+      const fracToAngle = f => (90 + f*360) * Math.PI/180; // radians
+
+      // Day arc path (sunrise -> sunset) on circle
+      const cx = 130, cy = 130, R = 120;
+      const a1 = fracToAngle(dayStartFrac);
+      const a2 = fracToAngle(dayEndFrac);
+      const x1 = cx + R * Math.cos(a1), y1 = cy + R * Math.sin(a1);
+      const x2 = cx + R * Math.cos(a2), y2 = cy + R * Math.sin(a2);
+      // Sunrise to sunset should be <= 180deg so large-arc flag = 0
+      const dayArc = document.getElementById('dayArc');
+      if(dayArc) dayArc.setAttribute('d', `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${R} ${R} 0 0 0 ${x2.toFixed(2)} ${y2.toFixed(2)}`);
+
+      // Sun orb position by full day progress (server gives 0..1 from midnight)
+      const progress = data.sun_progress;
+      const angle = fracToAngle(progress);
+      const sx = cx + R * Math.cos(angle);
+      const sy = cy + R * Math.sin(angle);
+      const sunOrb = document.getElementById('sunOrb');
+      if(sunOrb){
+        sunOrb.setAttribute('cx', sx.toFixed(2));
+        sunOrb.setAttribute('cy', sy.toFixed(2));
+        sunOrb.style.opacity = data.is_day ? 1 : 0.25;
+      }
+
+      // Progress bars
+      const dayPctEl = document.getElementById('dayProgressPct');
+      const dayBarEl = document.getElementById('dayProgressBar');
+      if(dayPctEl) dayPctEl.textContent = (progress*100).toFixed(1)+'%';
+      if(dayBarEl) dayBarEl.style.width = (progress*100)+'%';
+      const daylightPctEl = document.getElementById('daylightProgressPct');
+      const daylightBarEl = document.getElementById('daylightProgressBar');
+      if(data.daylight_progress != null){
+        const dpct = data.daylight_progress*100;
+        if(daylightPctEl) daylightPctEl.textContent = dpct.toFixed(1)+'%';
+        if(daylightBarEl) daylightBarEl.style.width = dpct+'%';
+      } else {
+        if(daylightPctEl) daylightPctEl.textContent = 'Night';
+        if(daylightBarEl) daylightBarEl.style.width = '0%';
+      }
+    } catch(e){
+      console.error('Sun position update failed', e);
+    }
+}
+// Refresh sun position every minute
+setInterval(updateSunPosition, 60000);
+// Initial call remains in init()
+
+async function refreshLatestImage(){
+  const r = await fetch('/latest-image');
+  if(!r.ok) return;
+  const j = await r.json();
+  if(j.image){
+    let img = document.getElementById('latestImageThumb');
+    if(!img){ return; }
+    const currentBase = img.getAttribute('src').split('?')[0];
+    const desiredBase = '/capture/' + j.image;
+    if(currentBase !== desiredBase){
+      img.src = desiredBase + '?t=' + Date.now();
+    }
+  }
+}
+// augment existing poll loop to also refresh image occasionally
+setInterval(refreshLatestImage, 60000);
+
+function setupAutoRefresh() {
+    const toggle = document.getElementById('autoRefreshToggle');
+    const intervalInput = document.getElementById('refreshInterval');
+    let refreshIntervalId = null;
+
+    function startAutoRefresh() {
+        if (refreshIntervalId) clearInterval(refreshIntervalId);
+        const interval = parseInt(intervalInput.value, 10) * 1000;
+        if (interval >= 5000) {
+            refreshIntervalId = setInterval(() => location.reload(), interval);
+        }
+    }
+
+    function stopAutoRefresh() {
+        clearInterval(refreshIntervalId);
+        refreshIntervalId = null;
+    }
+
+    toggle.addEventListener('change', () => {
+        if (toggle.checked) {
+            startAutoRefresh();
+            localStorage.setItem('autoRefresh', 'true');
+        } else {
+            stopAutoRefresh();
+            localStorage.setItem('autoRefresh', 'false');
+        }
+    });
+
+    intervalInput.addEventListener('change', () => {
+        localStorage.setItem('refreshInterval', intervalInput.value);
+        if (toggle.checked) {
+            startAutoRefresh();
+        }
+    });
+
+    // Restore state from localStorage
+    if (localStorage.getItem('autoRefresh') === 'true') {
+        toggle.checked = true;
+        startAutoRefresh();
+    }
+    if (localStorage.getItem('refreshInterval')) {
+        intervalInput.value = localStorage.getItem('refreshInterval');
+    }
+}
+
+function updateLightCountdown(){
+    const lightOnHour = parseInt("{{ light_on_hour }}", 10);
+    const lightOnMinute = parseInt("{{ light_on_minute|default(0) }}", 10);
+    const lightOffHour = parseInt("{{ light_off_hour|default(11) }}", 10);
+    const lightOffMinute = parseInt("{{ light_off_minute|default(0) }}", 10);
+    const centralTz = 'America/Chicago';
+    const now = new Date();
+    const nowInCentral = new Date(now.toLocaleString('en-US', { timeZone: centralTz }));
+
+    const nowMin = nowInCentral.getHours()*60 + nowInCentral.getMinutes();
+    const onMin = lightOnHour*60 + lightOnMinute;
+    const offMin = lightOffHour*60 + lightOffMinute;
+    const spanMidnight = onMin > offMin; // window crosses midnight if true
+
+    // Determine if lights currently ON using minute precision
+    const isOn = !spanMidnight ? (nowMin >= onMin && nowMin < offMin) : (nowMin >= onMin || nowMin < offMin);
+
+    function nextOccurrence(h, m){
+        const d = new Date(nowInCentral);
+        d.setHours(h, m, 0, 0);
+        if(d <= nowInCentral) d.setDate(d.getDate()+1);
+        return d;
+    }
+    const nextOn = nextOccurrence(lightOnHour, lightOnMinute);
+    const nextOff = nextOccurrence(lightOffHour, lightOffMinute);
+
+    const target = isOn ? nextOff : nextOn;
+    const diffMs = target - nowInCentral;
+    if(diffMs < 0){
+        setTimeout(updateLightCountdown, 500);
+        return;
+    }
+    const hours = Math.floor(diffMs / 3600000);
+    const mins = Math.floor((diffMs % 3600000) / 60000);
+    const secs = Math.floor((diffMs % 60000) / 1000);
+
+    const countdownEl = document.getElementById('lightCountdown');
+    if(countdownEl) countdownEl.textContent = `${hours}h ${mins}m ${secs}s`;
+
+    const statusEl = document.getElementById('lightCountdownStatus');
+    if(statusEl){
+        const action = isOn ? 'off' : 'on';
+        const whenStr = target.toLocaleTimeString('en-US', {timeZone: centralTz, hour:'numeric', minute:'2-digit'});
+        statusEl.textContent = `Lights are currently ${isOn ? 'ON' : 'OFF'} – they turn ${action.toUpperCase()} at ${whenStr} CT`;
+    }
+}
+// Interval set in init() earlier (reuse existing call) or add here if not present
+// Ensure only one interval:
+if(!window.__lightCycleInterval){
+  window.__lightCycleInterval = setInterval(updateLightCountdown, 1000);
+}
+
+// Replace any older off-countdown logic remnants (if present) by no-op
+function updateLightOffCountdown(){} // deprecated
+
+// Helpers
+function fmtNumber(n, digits=1){ return (n==null? '--' : Number(n).toFixed(digits)); }
+function fmtBytes(bytes){
+  if(bytes == null) return '--';
+  const units = ['B','KB','MB','GB','TB'];
+  let i = 0; let b = Number(bytes);
+  while(b >= 1024 && i < units.length-1){ b /= 1024; i++; }
+  return b.toFixed(1)+' '+units[i];
+}
+function secondsToHms(s){ if(s==null) return '--'; const d=Math.floor(s/86400); s%=86400; const h=Math.floor(s/3600); s%=3600; const m=Math.floor(s/60); const ss=Math.floor(s%60); return (d?d+'d ':'')+String(h).padStart(2,'0')+":"+String(m).padStart(2,'0')+":"+String(ss).padStart(2,'0'); }
+
+// Relative time helpers for Last Seen (updates every second without refetch)
+function relativeAgoFromMs(tsMs){
+  const s = Math.max(1, Math.floor((Date.now() - tsMs)/1000));
+  if(s < 60) return s + 's ago';
+  const m = Math.floor(s/60); if(m < 60) return m + 'm ago';
+  const h = Math.floor(m/60); if(h < 24) return h + 'h ' + (m%60) + 'm ago';
+  const d = Math.floor(h/24); return d + 'd ' + (h%24) + 'h ago';
+}
+function updateLastSeenRelativeTimes(){
+  const list = document.getElementById('lastSeenList');
+  if(!list) return;
+  list.querySelectorAll('[data-last-ts]')?.forEach(row => {
+    const ts = Number(row.getAttribute('data-last-ts'));
+    const agoEl = row.querySelector('[data-role="ago"]');
+    if(!isNaN(ts) && agoEl){
+      agoEl.textContent = relativeAgoFromMs(ts);
+    }
+  });
+}
+
+// VPD and Dew Point calculations (Temp F, RH %)
+function dewPointF(tempF, rh){
+  // Convert to C, Magnus formula
+  const T = (tempF - 32) * 5/9;
+  const a=17.62, b=243.12; // over water
+  const gamma = Math.log(rh/100) + (a*T)/(b+T);
+  const TdC = (b*gamma)/(a-gamma);
+  return TdC * 9/5 + 32;
+}
+function vpdKpa(tempF, rh){
+  // Tetens equation for saturation vapor pressure (kPa)
+  const T = (tempF - 32) * 5/9;
+  const es = 0.6108 * Math.exp((17.27*T)/(T+237.3));
+  const ea = es * (rh/100);
+  return Math.max(0, es - ea);
+}
+
+async function loadDailyStats(){
+  try{
+    const r = await fetch('/api/daily_stats');
+    if(!r.ok) return;
+    const s = await r.json();
+    if(s.temp){
+      document.getElementById('statTempAvg').textContent = fmtNumber(s.temp.avg,1)+'°F';
+      document.getElementById('statTempMin').textContent = fmtNumber(s.temp.min,1)+'°';
+      document.getElementById('statTempMax').textContent = fmtNumber(s.temp.max,1)+'°';
+    }
+    if(s.humidity){
+      document.getElementById('statHumAvg').textContent = fmtNumber(s.humidity.avg,1)+'%';
+      document.getElementById('statHumMin').textContent = fmtNumber(s.humidity.min,1)+'%';
+      document.getElementById('statHumMax').textContent = fmtNumber(s.humidity.max,1)+'%';
+    }
+    if(s.light){
+      document.getElementById('statLightAvg').textContent = fmtNumber(s.light.avg,0);
+      document.getElementById('statLightMin').textContent = fmtNumber(s.light.min,0);
+      document.getElementById('statLightMax').textContent = fmtNumber(s.light.max,0);
+    }
+    if(s.pressure){
+      document.getElementById('statPressureAvg').textContent = fmtNumber(s.pressure.avg,1)+' hPa';
+      document.getElementById('statPressureMin').textContent = fmtNumber(s.pressure.min,1)+' hPa';
+      document.getElementById('statPressureMax').textContent = fmtNumber(s.pressure.max,1)+' hPa';
+    }
+    if(s.altitude){
+      document.getElementById('statAltAvg').textContent = fmtNumber(s.altitude.avg,0)+' m';
+      document.getElementById('statAltMin').textContent = fmtNumber(s.altitude.min,0)+' m';
+      document.getElementById('statAltMax').textContent = fmtNumber(s.altitude.max,0)+' m';
+    }
+  }catch(e){ console.warn('daily stats failed', e); }
+}
+
+async function loadLastSeen(){
+  try{
+    const r = await fetch('/api/last_seen');
+    if(!r.ok) return;
+    const j = await r.json();
+    const list = document.getElementById('lastSeenList');
+    list.innerHTML = '';
+    const items = j.items || [];
+    if(items.length === 0){ list.innerHTML = '<div class="text-slate-500">No data yet.</div>'; return; }
+    items.forEach(it => {
+      const name = it.sensor_type + (it.plant_id? ` (plant ${it.plant_id})` : '');
+      const ts = Date.parse(it.last_ts);
+      const row = document.createElement('div');
+      row.className = 'flex justify-between gap-3';
+      row.setAttribute('data-last-ts', String(ts));
+      row.innerHTML = `<span class="text-slate-400">${name}</span>
+        <span class="text-slate-300">${new Date(ts).toLocaleString()}</span>
+        <span class="text-slate-500" data-role="ago"></span>`;
+      list.appendChild(row);
+    });
+    // Immediately compute the relative "ago" text without waiting for the next interval tick
+    updateLastSeenRelativeTimes();
+  }catch(e){ console.warn('last seen failed', e); }
+}
+
+async function loadStorage(){
+  try{
+    const r = await fetch('/api/storage_usage');
+    if(!r.ok) return;
+    const j = await r.json();
+    const used = j.disk_used_bytes;
+    const total = j.disk_total_bytes || 1;
+    const pct = Math.min(100, Math.max(0, (used / total) * 100));
+    document.getElementById('capSize').textContent = fmtBytes(j.capture_bytes);
+    document.getElementById('tlSize').textContent = fmtBytes(j.timelapse_bytes);
+    document.getElementById('dbSize').textContent = fmtBytes(j.db_bytes);
+    document.getElementById('diskUsed').textContent = fmtBytes(used) + ' / ' + fmtBytes(total);
+    document.getElementById('diskFree').textContent = fmtBytes(j.disk_free_bytes);
+    document.getElementById('diskBar').style.width = pct.toFixed(1) + '%';
+  }catch(e){ console.warn('storage usage failed', e); }
+}
+
+function updateVpdDewFromLatest(tempF, rh){
+  if(tempF==null || rh==null) return;
+  const vpd = vpdKpa(tempF, rh);
+  const dew = dewPointF(tempF, rh);
+  document.getElementById('vpdValue').textContent = vpd.toFixed(2);
+  document.getElementById('dewValue').textContent = dew.toFixed(1);
+  // Simple hint range
+  let hint = 'kPa';
+  if(vpd < 0.4) hint = 'Low (risk of mold)';
+  else if(vpd < 1.2) hint = 'Optimal veg';
+  else if(vpd < 1.6) hint = 'Optimal flower';
+  else hint = 'High (plant stress)';
+  document.getElementById('vpdHint').textContent = hint;
+}
+
+function updateLightTimeline(){
+  const onH = parseInt("{{ light_on_hour }}", 10);
+  const onM = parseInt("{{ light_on_minute|default(0) }}", 10);
+  const offH = parseInt("{{ light_off_hour|default(11) }}", 10);
+  const offM = parseInt("{{ light_off_minute|default(0) }}", 10);
+  const onMin = onH*60 + onM;
+  const offMin = offH*60 + offM;
+  const spanMid = onMin > offMin;
+  const barA = document.getElementById('lightOnBarA');
+  const barB = document.getElementById('lightOnBarB');
+  if(!barA || !barB) return;
+  if(!spanMid){
+    const leftPct = (onMin/1440)*100;
+    const widthPct = ((offMin-onMin)/1440)*100;
+    barA.style.left = leftPct + '%';
+    barA.style.width = widthPct + '%';
+    barB.style.width = '0%';
+  } else {
+    // Segment A: on -> 24:00
+    const leftA = (onMin/1440)*100;
+    const widthA = ((1440-onMin)/1440)*100;
+    barA.style.left = leftA + '%';
+    barA.style.width = widthA + '%';
+    // Segment B: 00:00 -> off
+    const leftB = 0;
+    const widthB = (offMin/1440)*100;
+    barB.style.left = leftB + '%';
+    barB.style.width = widthB + '%';
+  }
+  const meta = document.getElementById('lightTimelineMeta');
+  const fmt = (h,m) => new Date(2020,1,1,h,m).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+  meta.textContent = `On: ${fmt(onH,onM)} → Off: ${fmt(offH,offM)} (${spanMid? 'spans midnight' : 'same day'})`;
+  // Update current time marker each time timeline is recalculated
+  updateLightNowMarker();
+}
+
+function updateLightNowMarker(){
+  const centralTz = 'America/Chicago';
+  const now = new Date();
+  const nowCentral = new Date(now.toLocaleString('en-US', { timeZone: centralTz }));
+  const pct = ((nowCentral.getHours() + nowCentral.getMinutes()/60 + nowCentral.getSeconds()/3600) / 24) * 100;
+  const marker = document.getElementById('lightNowMarker');
+  const label = document.getElementById('lightNowLabel');
+  if(marker) marker.style.left = `calc(${pct}% - 1px)`;
+  if(label){
+    label.style.left = `${pct}%`;
+    label.textContent = nowCentral.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+}
+
+// Remove earlier wrapper override if present and ensure single initQuickWins usage
+function initQuickWins(){
+  loadDailyStats();
+  loadLastSeen();
+  loadStorage();
+  updateLightTimeline();
+  // Per-card update cadences
+  setInterval(loadDailyStats, 5*60*1000);
+  setInterval(loadLastSeen, 60*1000);
+  setInterval(loadStorage, 5*60*1000);
+  setInterval(updateLightTimeline, 60*1000);
+  // Smoothly update the current-time marker every second without extra layout work
+  if(!window.__lightNowInterval){
+    window.__lightNowInterval = setInterval(updateLightNowMarker, 1000);
+  }
+  // Update the "ago" timers every second like the other live widgets
+  if(!window.__lastSeenAgoInterval){
+    window.__lastSeenAgoInterval = setInterval(updateLastSeenRelativeTimes, 1000);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', initQuickWins);
+</script>
+{% endblock %}

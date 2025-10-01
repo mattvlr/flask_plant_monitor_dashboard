@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VPD + Dew Point → Live Calculations (Tetens + Magnus)</title>
+<style>
+  :root {
+    --fg: #111;
+    --bg: #fff;
+    --muted: #666;
+    --rule: #000;
+  }
+  html, body { background: var(--bg); color: var(--fg); margin: 0; padding: 0; }
+  body { font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1, h2, h3 { line-height: 1.25; margin: 28px 0 10px; }
+  h1 { font-size: 28px; }
+  h2 { font-size: 22px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+  h3 { font-size: 18px; }
+  p { margin: 10px 0 12px; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  pre { background: #f6f6f6; color: #000; border: 1px solid #000; padding: 14px; overflow:auto; }
+  kbd { border: 1px solid #000; padding: 2px 4px; font-size: 0.9em; }
+  .muted { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .grid-2-1 { display:grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+  .card { border: 1px solid var(--rule); padding: 14px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; }
+  th, td { border: 1px solid #000; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f0f0f0; }
+  ul { margin: 8px 0 12px 20px; }
+  ol { margin: 8px 0 12px 20px; }
+  .toc a { text-decoration: none; color: inherit; }
+  .toc li { margin: 4px 0; }
+  .callout { border: 1px solid #000; padding: 10px 12px; background: #fafafa; }
+  .small { font-size: 12px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  .hr { border-top: 2px solid #000; margin: 18px 0; }
+  @media print {
+    a[href]:after { content: " (" attr(href) ")"; font-size: 11px; }
+    .wrap { padding: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>VPD + Dew Point<br><span class="muted">Live VPD (kPa) and dew point (°F) from latest Temp/RH using Tetens + Magnus</span></h1>
+  <p class="muted">Monochrome, print-ready documentation. Emphasis on exact formulas, unit handling, payloads, and drop-in code.</p>
+
+  <h2 id="toc">Contents</h2>
+  <ol class="toc">
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#inputs">Inputs & Units</a></li>
+    <li><a href="#formulas">Formulas (Tetens + Magnus)</a></li>
+    <li><a href="#targets">Target Ranges</a></li>
+    <li><a href="#network">Network & Endpoint</a></li>
+    <li><a href="#payload">Payload Contract</a></li>
+    <li><a href="#py">Python Reference Implementation</a></li>
+    <li><a href="#js">JavaScript Reference Implementation</a></li>
+    <li><a href="#widget">Minimal Front-End Widget</a></li>
+    <li><a href="#behavior">Runtime Behavior</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+    <li><a href="#validation">Validation Checklist</a></li>
+    <li><a href="#security">Security & Hardening</a></li>
+    <li><a href="#ext">Extensions & Variations</a></li>
+    <li><a href="#interpretation">Interpreting VPD & Dew Point</a></li>
+    <li><a href="#refs">Quick Reference</a></li>
+  </ol>
+
+  <h2 id="overview">1) Overview</h2>
+  <p>Compute two derived climate metrics for the tent from air temperature and relative humidity:</p>
+  <ul>
+    <li><strong>VPD</strong> (kPa): vapor pressure deficit = saturation vapor pressure at air temp − actual vapor pressure. Higher VPD = drier air.</li>
+    <li><strong>Dew point</strong> (°F): temperature where air reaches 100% RH if cooled at constant pressure.</li>
+  </ul>
+  <p>Implementation uses <em>Tetens</em> for saturation vapor pressure and <em>Magnus</em> for dew point. Constants match the dashboard implementation.</p>
+
+  <h2 id="inputs">2) Inputs & Units</h2>
+  <table>
+    <thead><tr><th>Key</th><th>Type</th><th>Units</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>air_temp_f</td><td>float</td><td>°F</td><td>From your DHTxx/SHTxx/BME280 pipeline. Convert to °C for math.</td></tr>
+      <tr><td>rh_pct</td><td>float</td><td>%</td><td>0–100. Clamp to [1, 100] to avoid log(0) in Magnus.</td></tr>
+      <tr><td>leaf_temp_c</td><td>float (optional)</td><td>°C</td><td>If you have IR leaf temp, use it for VPD saturation term. Else use air temp.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="formulas">3) Formulas (Tetens + Magnus)</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>3.1 Tetens (kPa)</h3>
+      <p>Use for saturation vapor pressure at temperature <span class="mono">T<sub>C</sub></span> (°C):</p>
+      <pre><code>// Saturation vapor pressure (kPa)
+e_s(Tc) = 0.6108 * exp( (17.27 * Tc) / (Tc + 237.3) )
+
+// Actual vapor pressure (kPa)
+e_a = e_s(Tc_air) * (RH / 100.0)
+
+// Vapor Pressure Deficit (kPa)
+// Use Tc_leaf if available, else Tc_air
+VPD = max(0, e_s(Tc_for_sat) - e_a)</code></pre>
+      <p class="small muted">0.6108 and 17.27/237.3 are used in the dashboard. Keep these constants consistent across server and browser.</p>
+    </div>
+    <div class="card">
+      <h3>3.2 Magnus (dew point)</h3>
+      <p>Dew point <span class="mono">Td</span> (°C) from air temp and RH:</p>
+      <pre><code>a = 17.62
+b = 243.12  // °C
+gamma = ln(RH/100) + (a * Tc_air) / (b + Tc_air)
+Td_C = (b * gamma) / (a - gamma)
+Td_F = Td_C * 9/5 + 32</code></pre>
+      <p class="small muted">Clamp RH to [1, 100] before computing <span class="mono">ln(RH/100)</span>.</p>
+    </div>
+  </div>
+
+  <h2 id="targets">4) Target Ranges</h2>
+  <table>
+    <thead><tr><th>Stage</th><th>VPD Target (kPa)</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Seedling/Clones</td><td>0.6–0.8</td><td>Higher humidity to reduce stress.</td></tr>
+      <tr><td>Vegetative</td><td>0.8–1.2</td><td>Balanced growth and transpiration.</td></tr>
+      <tr><td>Flower/Fruiting</td><td>1.2–1.6</td><td>Lower humidity to limit mold risk.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout small">
+    <strong>Condensation risk:</strong> if <span class="mono">air_temp_f − dew_point_f &lt; 3–5°F</span>, surfaces may sweat. Increase airflow or reduce RH.
+  </div>
+
+  <h2 id="network">5) Network & Endpoint</h2>
+  <p>Assume your server exposes the latest air temp and RH, and accepts derived metrics:</p>
+  <table>
+    <tbody>
+      <tr><th>GET latest env</th><td><code>GET http://&lt;host&gt;:5001/api/latest</code></td></tr>
+      <tr><th>POST derived</th><td><code>POST http://&lt;host&gt;:5001/add_data</code> <span class="small muted">(single reading per request)</span></td></tr>
+      <tr><th>Content-Type</th><td><code>application/json</code></td></tr>
+      <tr><th>Interval</th><td>Every 60&nbsp;s (or on new sensor sample)</td></tr>
+      <tr><th>Timeout</th><td>5&nbsp;s</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="payload">6) Payload Contract</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>6.1 Input example (<code>/api/latest</code>)</h3>
+      <pre><code>{
+  "temp": 77.9,           // °F
+  "humidity": 58.2,       // % RH
+  "light": 123            // lux (example)
+}</code></pre>
+    </div>
+    <div class="card">
+      <h3>6.2 Derived POST (<code>/add_data</code>)</h3>
+      <pre><code>{
+  "sensor_type": "vpd_kpa",  // or "dew_point_f"
+  "reading": 1.12,            // numeric value only
+  "plant_id": null            // optional
+}
+// Post one reading per request.
+// Example (dew point): {"sensor_type":"dew_point_f","reading":61.7}</code></pre>
+    </div>
+  </div>
+  <p class="small muted">Return HTTP 200/201 on success. Log non-2xx with input values.</p>
+
+  <h2 id="py">7) Python Reference Implementation</h2>
+  <pre><code># Pure functions with explicit units and clamps.
+# Matches the dashboard constants (Tetens + Magnus).
+
+import math
+from typing import Tuple
+
+A_TETENS = 17.27
+B_TETENS = 237.3   # °C
+K0 = 0.6108        # kPa
+
+A_MAGNUS = 17.62
+B_MAGNUS = 243.12  # °C
+
+def f_to_c(tf: float) -> float:
+    return (tf - 32.0) * (5.0/9.0)
+
+def c_to_f(tc: float) -> float:
+    return tc * (9.0/5.0) + 32.0
+
+def tetens_es_kpa(tc: float) -> float:
+    # Saturation vapor pressure (kPa) at Tc (°C)
+    return K0 * math.exp((A_TETENS * tc) / (B_TETENS + tc))
+
+def dew_point_f_from_air(tf_air: float, rh_pct: float) -> float:
+    # Clamp RH to [1,100] to avoid log(0) and nonsense
+    rh = max(1.0, min(100.0, rh_pct))
+    tc = f_to_c(tf_air)
+    gamma = math.log(rh / 100.0) + (A_MAGNUS * tc) / (B_MAGNUS + tc)
+    td_c = (B_MAGNUS * gamma) / (A_MAGNUS - gamma)
+    td_f = c_to_f(td_c)
+    return td_f
+
+def vpd_kpa_from_air(tf_air: float, rh_pct: float, tf_leaf: float | None = None) -> float:
+    # Use leaf temperature for saturation term if available; else air temp.
+    rh = max(0.0, min(100.0, rh_pct))
+    tc_air = f_to_c(tf_air)
+    tc_sat = f_to_c(tf_leaf) if tf_leaf is not None else tc_air
+    es = tetens_es_kpa(tc_sat)              # saturation at leaf/air
+    ea = tetens_es_kpa(tc_air) * (rh/100.0) # actual vapor pressure from air
+    vpd = max(0.0, es - ea)                 # never negative
+    return vpd
+
+# Example usage with prints for debug:
+if __name__ == "__main__":
+    tf = 77.9
+    rh = 58.2
+    print(f"[DEBUG] air_temp_f={tf} rh_pct={rh}")
+    dp = dew_point_f_from_air(tf, rh)
+    vpd = vpd_kpa_from_air(tf, rh)  # no leaf temp
+    print(f"[DEBUG] dew_point_f={dp:.2f} vpd_kpa={vpd:.3f}")</code></pre>
+
+  <h2 id="js">8) JavaScript Reference Implementation</h2>
+  <pre><code>&lt;script&gt;
+// Minimal, no dependencies. Mirrors the dashboard implementation.
+
+const A_T = 17.27, B_T = 237.3, K0 = 0.6108;     // Tetens (kPa)
+const A_M = 17.62, B_M = 243.12;                 // Magnus (dew point)
+
+function fToC(tf){ return (tf - 32) * (5/9); }
+function cToF(tc){ return tc * (9/5) + 32; }
+function tetensKPa(tc){ return K0 * Math.exp((A_T * tc) / (B_T + tc)); }
+
+function dewPointF(airTempF, rhPct){
+  const rh = Math.min(100, Math.max(1, rhPct));
+  const Tc = fToC(airTempF);
+  const gamma = Math.log(rh/100) + (A_M * Tc) / (B_M + Tc);
+  const TdC = (B_M * gamma) / (A_M - gamma);
+  const TdF = cToF(TdC);
+  console.log("[dp] Tc=%s rh=%s TdF=%s", Tc.toFixed(2), rh.toFixed(1), TdF.toFixed(2));
+  return TdF;
+}
+
+function vpdKPa(airTempF, rhPct, leafTempF=null){
+  const rh = Math.min(100, Math.max(0, rhPct));
+  const Tc_air = fToC(airTempF);
+  const Tc_sat = leafTempF==null ? Tc_air : fToC(leafTempF);
+  const es = tetensKPa(Tc_sat);
+  const ea = tetensKPa(Tc_air) * (rh/100);
+  const vpd = Math.max(0, es - ea);
+  console.log("[vpd] es=%s ea=%s vpd=%s", es.toFixed(4), ea.toFixed(4), vpd.toFixed(4));
+  return vpd;
+}
+&lt;/script&gt;</code></pre>
+
+  <h2 id="widget">9) Minimal Front-End Widget</h2>
+  <div class="card">
+    <p class="small muted">Drop this into your dashboard page. It calls <span class="mono">/api/latest</span> and renders live VPD and dew point.</p>
+    <pre><code>&lt;div id="vpdbox" class="card"&gt;
+  &lt;strong&gt;Live Air:&lt;/strong&gt; &lt;span id="air"&gt;--&lt;/span&gt; °F,
+  &lt;strong&gt;RH:&lt;/strong&gt; &lt;span id="rh"&gt;--&lt;/span&gt; %,
+  &lt;strong&gt;VPD:&lt;/strong&gt; &lt;span id="vpd"&gt;--&lt;/span&gt; kPa,
+  &lt;strong&gt;Dew Pt:&lt;/strong&gt; &lt;span id="dp"&gt;--&lt;/span&gt; °F
+&lt;/div&gt;
+
+&lt;script&gt;
+async function refreshVPD(){
+  try{
+    const r = await fetch("/api/latest", { cache:"no-store" });
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    const tf = Number(j.temp);
+    const rh = Number(j.humidity);
+    const v = vpdKPa(tf, rh);
+    const dpf = dewPointF(tf, rh);
+    document.getElementById("air").textContent = tf.toFixed(1);
+    document.getElementById("rh").textContent  = rh.toFixed(1);
+    document.getElementById("vpd").textContent = v.toFixed(2);
+    document.getElementById("dp").textContent  = dpf.toFixed(1);
+    console.log("[widget] tf=%s rh=%s vpd=%s dp=%s", tf, rh, v, dpf);
+  }catch(err){
+    console.log("[widget] refresh error:", err);
+  }
+}
+refreshVPD();
+setInterval(refreshVPD, 60000);
+&lt;/script&gt;</code></pre>
+  </div>
+
+  <h2 id="behavior">10) Runtime Behavior</h2>
+  <div class="grid-2-1">
+    <div class="card">
+      <h3>State Flow</h3>
+      <ol>
+        <li><strong>Fetch</strong>: Read latest <span class="mono">temp</span> and <span class="mono">humidity</span> from <span class="mono">/api/latest</span>.</li>
+        <li><strong>Compute</strong>: Derive <span class="mono">vpd_kpa</span> and <span class="mono">dew_point_f</span>.</li>
+        <li><strong>Publish</strong>: POST derived JSON to your store if you persist derived metrics.</li>
+      </ol>
+    </div>
+    <div class="card">
+      <h3>Design Notes</h3>
+      <ul>
+        <li>Use leaf temp for saturation term when you add an IR sensor.</li>
+        <li>Never let VPD go negative. Clamp at zero.</li>
+        <li>Keep constants consistent across Python and JS.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="troubleshooting">11) Troubleshooting</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Spiky VPD</h3>
+      <ul>
+        <li>Average RH over 30–60&nbsp;s before deriving.</li>
+        <li>Avoid mixing °C/°F in the same call.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Dew Point Looks Wrong</h3>
+      <ul>
+        <li>Confirm RH in 0–100%. Clamp to [1,100] for Magnus.</li>
+        <li>Verify temperature conversion (F→C).</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Condensation</h3>
+      <ul>
+        <li>Increase airflow across leaves and walls.</li>
+        <li>Reduce humidifier duty or increase setpoint VPD.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="validation">12) Validation Checklist</h2>
+  <ul>
+    <li>Hand-check one sample with a calculator: expected VPD within ±0.02&nbsp;kPa.</li>
+    <li>Dew point difference <span class="mono">air_temp_f − dew_point_f</span> grows when RH drops.</li>
+    <li>Constants identical in server and browser code.</li>
+  </ul>
+
+  <h2 id="security">13) Security & Hardening</h2>
+  <ul>
+    <li>LAN is fine with HTTP. Use TLS for WAN access.</li>
+    <li>Add <span class="mono">X-API-Key</span> and verify server-side on write routes.</li>
+    <li>Rate-limit POSTs to derived endpoint.</li>
+  </ul>
+
+  <h2 id="ext">14) Extensions & Variations</h2>
+  <ul>
+    <li>Persist raw inputs. Derive VPD/dew point on read for latest values.</li>
+    <li>Store both <span class="mono">vpd_kpa_air</span> and <span class="mono">vpd_kpa_leaf</span> if you add IR leaf temp.</li>
+    <li>Emit an alert when VPD out of bounds for &gt; N minutes.</li>
+  </ul>
+
+  <h2 id="interpretation">15) Interpreting VPD & Dew Point</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Plant Physiology (What VPD means)</h3>
+      <ul>
+        <li><strong>Low VPD (&lt; 0.4&nbsp;kPa)</strong>: Air is near saturation. Transpiration is slow; stomata may partially close due to low vapor gradient. Risk of mold/mildew increases. Consider lowering RH or increasing temperature/airflow.</li>
+        <li><strong>Vegetative “comfort” (≈ 0.8–1.2&nbsp;kPa)</strong>: Healthy transpiration, good nutrient flow. Aim here during veg for balanced growth.</li>
+        <li><strong>Flowering “comfort” (≈ 1.2–1.6&nbsp;kPa)</strong>: Slightly drier air suppresses mold risk and tightens internodes. Monitor irrigation—plants drink faster.</li>
+        <li><strong>High VPD (&gt; 1.8&nbsp;kPa)</strong>: Air is very dry relative to leaves. Plants can over-transpire, leading to leaf curl, edge burn, or Ca/Mg transport issues. Raise RH or lower temperature.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Dew Point (Condensation & Disease)</h3>
+      <ul>
+        <li><strong>Safety margin</strong>: Track <span class="mono">air_temp_f − dew_point_f</span>. When this gap &lt; 3–5°F, surfaces may sweat—prime conditions for botrytis/powdery mildew.</li>
+        <li><strong>Night cycles</strong>: As air cools after lights-off, dew point may cross room temperature. Preempt by reducing RH before lights-out or by maintaining gentle airflow.</li>
+        <li><strong>Leaf wetness proxy</strong>: You rarely measure leaf wetness—dew point margin is a practical proxy.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h3>Operational Playbook</h3>
+      <ul>
+        <li>If <strong>VPD low</strong>: decrease humidifier duty, increase exhaust/air exchange, or raise temp slightly.</li>
+        <li>If <strong>VPD high</strong>: increase humidifier duty, reduce dehumidifier/exhaust, or lower temp.</li>
+        <li>Use <strong>stage targets</strong> above; adjust gradually to avoid plant shock.</li>
+        <li>Watch for <strong>symptoms</strong>: low VPD → droopy/leathery; high VPD → edge curl, rapid wilting between irrigations.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>How the Dashboard Helps</h3>
+      <ul>
+        <li><strong>Live VPD</strong> is computed client-side from <span class="mono">temp</span> and <span class="mono">humidity</span> pulled from <span class="mono">/api/latest</span>.</li>
+        <li><strong>Dew point</strong> is calculated with Magnus; the hint under VPD classifies the range: “Low (risk of mold)”, “Optimal veg”, “Optimal flower”, or “High (plant stress)”.</li>
+        <li>Use the <strong>history charts</strong> and <strong>light cycle</strong> context to interpret spikes at lights-on/off.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="refs">16) Quick Reference</h2>
+  <table>
+    <thead><tr><th>Item</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Tetens constant (kPa)</td><td>0.6108</td></tr>
+      <tr><td>Tetens a</td><td>17.27</td></tr>
+      <tr><td>Tetens b (°C)</td><td>237.3</td></tr>
+      <tr><td>Magnus a</td><td>17.62</td></tr>
+      <tr><td>Magnus b (°C)</td><td>243.12</td></tr>
+      <tr><td>F→C</td><td><span class="mono">(F − 32) × 5/9</span></td></tr>
+      <tr><td>C→F</td><td><span class="mono">C × 9/5 + 32</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="hr"></div>
+  <p class="small muted">This document is intentionally black-and-white for clean printing and photocopying.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,181 @@
+{% extends 'base.html' %}
+{% block title %}Camera - Greenhouse{% endblock %}
+
+{% block content %}
+<h2 class="text-sm font-semibold text-slate-400 tracking-wider mb-4">ESP32 Camera</h2>
+<div class="grid gap-6 grid-cols-1 lg:grid-cols-3">
+  <div class="lg:col-span-2 card">
+    <div class="flex items-center justify-between mb-3">
+      <div class="label">Live Preview</div>
+      <div class="text-xs text-slate-400">Base: <span id="baseUrlDisp"></span></div>
+    </div>
+    <div class="relative">
+      <img id="preview" src="" alt="Preview" class="w-full h-auto rounded-lg bg-black" />
+      <button id="refreshBtn" class="absolute bottom-3 right-3 px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-xs">Refresh</button>
+    </div>
+    <div class="mt-3 flex items-center gap-3 text-xs text-slate-400">
+      <label class="flex items-center gap-1"><input id="autoRefresh" type="checkbox" class="accent-emerald-500" /> Auto refresh</label>
+      <input id="autoRefreshSec" type="number" min="2" value="5" class="w-16 bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-slate-200 text-right" /> s
+    </div>
+  </div>
+  <div class="card">
+    <div class="label">Device</div>
+    <div class="mt-3 space-y-2 text-sm">
+      <div class="flex justify-between"><span>IP</span><span id="stIp">--</span></div>
+      <div class="flex justify-between"><span>RSSI</span><span id="stRssi">--</span></div>
+      <div class="flex justify-between"><span>Uptime</span><span id="stUptime">--</span></div>
+      <div class="flex justify-between"><span>Heap</span><span id="stHeap">--</span></div>
+      <div class="flex justify-between"><span>PSRAM</span><span id="stPsram">--</span></div>
+      <div class="flex justify-between"><span>Framesize</span><span id="stFramesize">--</span></div>
+      <div class="flex justify-between"><span>Quality</span><span id="stQuality">--</span></div>
+      <div class="flex justify-between"><span>Flip</span><span id="stFlip">--</span></div>
+    </div>
+    <hr class="my-4 border-slate-700" />
+    <div class="label">Controls</div>
+    <div class="mt-3 space-y-3 text-sm">
+      <div>
+        <label class="text-xs text-slate-400">Camera URL</label>
+        <input id="baseUrl" type="text" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-2 py-1" value="{{ camera_base_url }}" />
+      </div>
+      <div>
+        <label class="text-xs text-slate-400">Resolution (WxH)</label>
+        <select id="framesize" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-2 py-1">
+          <option value="QQVGA">160x120</option>
+          <option value="QCIF">176x144</option>
+          <option value="HQVGA">240x176</option>
+          <option value="QVGA">320x240</option>
+          <option value="CIF">352x288</option>
+          <option value="VGA">640x480</option>
+          <option value="SVGA">800x600</option>
+          <option value="XGA">1024x768</option>
+          <option value="SXGA">1280x1024</option>
+          <option value="UXGA">1600x1200</option>
+          <option value="QXGA">2048x1536</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400">JPEG Quality (5=best)</label>
+        <input id="quality" type="range" min="5" max="63" value="10" class="w-full" />
+        <div class="text-xs text-slate-500">Current: <span id="qualityVal">10</span></div>
+      </div>
+      <div class="flex items-center gap-4">
+        <label class="flex items-center gap-2"><input id="vflip" type="checkbox" class="accent-emerald-500" /> Vertical Flip</label>
+        <label class="flex items-center gap-2"><input id="hmirror" type="checkbox" class="accent-emerald-500" /> Horizontal Mirror</label>
+      </div>
+      <div class="flex flex-wrap gap-2 pt-2">
+        <button id="applyBtn" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500">Apply</button>
+        <button id="ledOnBtn" class="px-3 py-1.5 rounded-lg bg-amber-500/80 hover:bg-amber-500">LED On</button>
+        <button id="ledOffBtn" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600">LED Off</button>
+        <button id="restartCamBtn" class="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500">Restart Camera</button>
+        <button id="rebootBtn" class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500" onclick="return confirm('Reboot device now?')">Reboot ESP32</button>
+      </div>
+      <div id="msg" class="text-xs text-slate-400"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const $ = s => document.querySelector(s);
+function fmtBytes(b){ if(b==null) return '--'; const u=['B','KB','MB']; let i=0; let n=+b; while(n>=1024&&i<u.length-1){ n/=1024; i++; } return n.toFixed(1)+' '+u[i]; }
+function fmtUptime(ms){ if(ms==null) return '--'; const s=Math.floor(ms/1000); const d=Math.floor(s/86400); const h=Math.floor((s%86400)/3600); const m=Math.floor((s%3600)/60); const se=s%60; return (d?d+'d ':'')+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(se).padStart(2,'0'); }
+
+let refreshTimer=null;
+
+function getBase(){ return ($('#baseUrl').value||'').replace(/\/$/,''); }
+function setMsg(t, ok=true){ const el=$('#msg'); el.textContent=t||''; el.className = 'text-xs ' + (ok? 'text-emerald-300' : 'text-rose-300'); }
+
+async function loadStatus(){
+  try{
+    const url = `/camera/api/status?base=${encodeURIComponent(getBase())}`;
+    const r = await fetch(url);
+    const j = await r.json();
+    if(j.error){ setMsg('Status error: '+j.error, false); return; }
+    $('#stIp').textContent = j.ip || '--';
+    $('#stRssi').textContent = (j.rssi_dbm!=null? j.rssi_dbm+' dBm':'--');
+    $('#stUptime').textContent = fmtUptime(j.uptime_ms);
+    $('#stHeap').textContent = fmtBytes(j.free_heap);
+    $('#stPsram').textContent = fmtBytes(j.free_psram);
+    $('#stFramesize').textContent = j.framesize;
+    $('#stQuality').textContent = j.quality;
+    $('#stFlip').textContent = (j.vflip? 'V ':'') + (j.hmirror? 'H':'');
+    // Reflect controls
+    if(j.framesize){ $('#framesize').value = j.framesize; }
+    if(j.quality!=null){ $('#quality').value = j.quality; $('#qualityVal').textContent = j.quality; }
+    $('#vflip').checked = !!j.vflip;
+    $('#hmirror').checked = !!j.hmirror;
+  }catch(e){ setMsg('Status failed', false); }
+}
+
+function updatePreview(){
+  const src = `/camera/preview.jpg?base=${encodeURIComponent(getBase())}&_=${Date.now()}`;
+  $('#preview').src = src;
+  $('#baseUrlDisp').textContent = getBase();
+}
+
+async function apply(){
+  const p = new URLSearchParams({
+    base: getBase(),
+    framesize: $('#framesize').value,
+    quality: $('#quality').value,
+    vflip: $('#vflip').checked ? '1':'0',
+    hmirror: $('#hmirror').checked ? '1':'0'
+  });
+  try{
+    const r = await fetch('/camera/api/set?'+p.toString());
+    const j = await r.json();
+    if(j.error){ setMsg('Apply failed: '+j.error, false); return; }
+    setMsg('Settings applied');
+    setTimeout(loadStatus, 600);
+    updatePreview();
+  }catch(e){ setMsg('Apply failed', false); }
+}
+
+async function led(on){
+  const p = new URLSearchParams({base:getBase(), on: on? '1':'0'});
+  const r = await fetch('/camera/api/led?'+p.toString());
+  const j = await r.json();
+  if(j.error){ setMsg('LED error: '+j.error, false); } else { setMsg(j.message||'LED OK'); }
+}
+async function reboot(){
+  const p = new URLSearchParams({base:getBase()});
+  const r = await fetch('/camera/api/reboot?'+p.toString());
+  const j = await r.json();
+  if(j.error){ setMsg('Reboot failed: '+j.error, false); } else { setMsg('Rebooting...'); }
+}
+async function restartCam(){
+  const p = new URLSearchParams({base:getBase()});
+  const r = await fetch('/camera/api/restart_camera?'+p.toString());
+  const j = await r.json();
+  if(j.error){ setMsg('Restart failed: '+j.error, false); } else { setMsg('Camera restarting...'); setTimeout(loadStatus, 2000); }
+}
+
+function init(){
+  $('#quality').addEventListener('input', ()=> $('#qualityVal').textContent = $('#quality').value);
+  $('#applyBtn').addEventListener('click', apply);
+  $('#ledOnBtn').addEventListener('click', ()=>led(true));
+  $('#ledOffBtn').addEventListener('click', ()=>led(false));
+  $('#rebootBtn').addEventListener('click', reboot);
+  $('#restartCamBtn').addEventListener('click', restartCam);
+  $('#refreshBtn').addEventListener('click', updatePreview);
+  $('#baseUrl').addEventListener('change', ()=>{ updatePreview(); loadStatus(); localStorage.setItem('cameraBase', getBase()); });
+  $('#autoRefresh').addEventListener('change', ()=>{
+    if($('#autoRefresh').checked){
+      const sec = Math.max(2, parseInt($('#autoRefreshSec').value||'5', 10));
+      refreshTimer = setInterval(updatePreview, sec*1000);
+    } else { clearInterval(refreshTimer); refreshTimer=null; }
+  });
+  $('#autoRefreshSec').addEventListener('change', ()=>{
+    if($('#autoRefresh').checked){ $('#autoRefresh').dispatchEvent(new Event('change')); }
+  });
+  // Restore base from localStorage
+  const saved = localStorage.getItem('cameraBase');
+  if(saved){ $('#baseUrl').value = saved; }
+  updatePreview();
+  loadStatus();
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+{% endblock %}
